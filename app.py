@@ -94,12 +94,12 @@ def handle_text(event):
     # 離開聊天
     if text == "離開":
 
-        if user_id in pairs:
+      if user_id in pairs:
 
-            partner = pairs[user_id]
+    partner = pairs[user_id]
 
-            del pairs[user_id]
-            del pairs[partner]
+    pairs.pop(user_id, None)
+    pairs.pop(partner, None)
 
             push_text(partner, "❌ 對方已離開聊天")
             reply(event.reply_token, "你已離開聊天")
