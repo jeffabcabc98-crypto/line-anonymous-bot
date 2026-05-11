@@ -4,6 +4,8 @@ import requests
 import uuid
 import time
 
+from datetime import datetime, timedelta, timezone
+
 from linebot.v3 import WebhookHandler
 from linebot.v3.messaging import (
     Configuration,
@@ -110,7 +112,6 @@ def handle_text(event):
 
                     return
 
-            # 更新時間
             sticker_cooldown[user_id] = now
 
             result = supabase.table("chat_pairs") \
@@ -123,25 +124,19 @@ def handle_text(event):
 
                 partner = result.data[0]["partner_id"]
 
-                # 先傳文字
+                # 傳文字
                 push_text(partner, text)
 
-                # 再傳 emoji 圖片
+                # 傳 emoji 圖
                 for emoji in event.message.emojis:
 
                     product_id = emoji.product_id
                     emoji_id = emoji.emoji_id
 
-                    print("表情貼")
-                    print(product_id)
-                    print(emoji_id)
-
                     emoji_url = (
                         f"https://stickershop.line-scdn.net/"
                         f"sticonshop/v1/sticon/{product_id}/iPhone/{emoji_id}.png"
                     )
-
-                    print(emoji_url)
 
                     try:
 
@@ -175,6 +170,7 @@ def handle_text(event):
 
             print("開始配對")
 
+            # 已在等待池
             check_waiting = supabase.table("waiting_users") \
                 .select("*") \
                 .eq("user_id", user_id) \
@@ -185,6 +181,7 @@ def handle_text(event):
                 reply(event.reply_token, "⏳ 你已經在等待配對中了")
                 return
 
+            # 已在聊天
             check_chat = supabase.table("chat_pairs") \
                 .select("*") \
                 .eq("user_id", user_id) \
@@ -195,6 +192,7 @@ def handle_text(event):
                 reply(event.reply_token, "💬 你目前已經在聊天中了")
                 return
 
+            # 找等待中的人
             result = supabase.table("waiting_users") \
                 .select("*") \
                 .neq("user_id", user_id) \
@@ -203,15 +201,51 @@ def handle_text(event):
 
             print(result.data)
 
+            # 有人等待
             if result.data:
 
                 partner = result.data[0]["user_id"]
 
+                # =========================
+                # 防止一小時內重複配對
+                # =========================
+                one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+
+                recent = supabase.table("recent_pairs") \
+                    .select("*") \
+                    .or_(
+                        f"and(user1.eq.{user_id},user2.eq.{partner}),"
+                        f"and(user1.eq.{partner},user2.eq.{user_id})"
+                    ) \
+                    .gte("created_at", one_hour_ago.isoformat()) \
+                    .execute()
+
+                # 一小時內配對過
+                if recent.data:
+
+                    print("一小時內配對過")
+
+                    # 對方放回等待池
+                    supabase.table("waiting_users") \
+                        .upsert({
+                            "user_id": partner
+                        }) \
+                        .execute()
+
+                    reply(
+                        event.reply_token,
+                        "⏳ 正在尋找新的聊天對象..."
+                    )
+
+                    return
+
+                # 移除等待池
                 supabase.table("waiting_users") \
                     .delete() \
                     .eq("user_id", partner) \
                     .execute()
 
+                # 建立聊天室
                 supabase.table("chat_pairs").insert([
                     {
                         "user_id": user_id,
@@ -222,6 +256,12 @@ def handle_text(event):
                         "partner_id": user_id
                     }
                 ]).execute()
+
+                # 記錄最近配對
+                supabase.table("recent_pairs").insert({
+                    "user1": user_id,
+                    "user2": partner
+                }).execute()
 
                 reply(event.reply_token, "✅ 配對成功！")
                 push_text(partner, "✅ 配對成功！")
@@ -256,6 +296,7 @@ def handle_text(event):
 
             partner = result.data[0]["partner_id"]
 
+            # 刪除聊天室
             supabase.table("chat_pairs") \
                 .delete() \
                 .eq("user_id", user_id) \
@@ -301,7 +342,7 @@ def handle_text(event):
 
 
 # =========================
-# LINE貼圖 → 原生優先 + 圖片備援
+# LINE貼圖
 # =========================
 @handler.add(MessageEvent, message=StickerMessageContent)
 def handle_sticker(event):
@@ -328,7 +369,6 @@ def handle_sticker(event):
 
                 return
 
-        # 更新時間
         sticker_cooldown[user_id] = now
 
         result = supabase.table("chat_pairs") \
@@ -353,8 +393,6 @@ def handle_sticker(event):
         # 原生貼圖
         # =========================
         try:
-
-            print("嘗試原生貼圖")
 
             with ApiClient(configuration) as api_client:
 
@@ -385,12 +423,16 @@ def handle_sticker(event):
         # =========================
         urls = [
 
+            # 一般貼圖
             f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/ANDROID/sticker.png",
 
+            # 動態貼圖
             f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/IOS/sticker_animation.png",
 
+            # Popup
             f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/IOS/sticker_popup.png",
 
+            # 表情貼
             f"https://stickershop.line-scdn.net/sticonshop/v1/sticon/{sticker_id}/iPhone/001.png"
         ]
 
@@ -419,9 +461,6 @@ def handle_sticker(event):
 
             push_text(partner, "🎭 對方傳送了一個特殊貼圖")
             return
-
-        print("找到貼圖網址:")
-        print(sticker_url)
 
         with ApiClient(configuration) as api_client:
 
@@ -470,9 +509,6 @@ def handle_image(event):
 
         message_id = event.message.id
 
-        print("圖片 message_id:")
-        print(message_id)
-
         headers = {
             "Authorization": "Bearer " + CHANNEL_ACCESS_TOKEN
         }
@@ -480,9 +516,6 @@ def handle_image(event):
         url = f"https://api-data.line.me/v2/bot/message/{message_id}/content"
 
         response = requests.get(url, headers=headers)
-
-        print("status:")
-        print(response.status_code)
 
         if response.status_code != 200:
 
