@@ -74,15 +74,39 @@ def handle_text(event):
     # =========================
     # 開始配對
     # =========================
-    
-    # =========================
-    # 開始配對
-    # =========================
     if text == "開始":
 
         print("開始配對")
 
+        # =========================
+        # 檢查是否已在等待池
+        # =========================
+        check_waiting = supabase.table("waiting_users") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .execute()
+
+        if check_waiting.data:
+
+            reply(event.reply_token, "⏳ 你已經在等待配對中了")
+            return
+
+        # =========================
+        # 檢查是否已在聊天中
+        # =========================
+        check_chat = supabase.table("chat_pairs") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .execute()
+
+        if check_chat.data:
+
+            reply(event.reply_token, "💬 你目前已經在聊天中了")
+            return
+
+        # =========================
         # 找等待中的人
+        # =========================
         result = supabase.table("waiting_users") \
             .select("*") \
             .neq("user_id", user_id) \
@@ -91,12 +115,14 @@ def handle_text(event):
 
         print(result.data)
 
+        # =========================
         # 有人等待
+        # =========================
         if result.data:
 
             partner = result.data[0]["user_id"]
 
-            # 從等待池移除
+            # 從等待池移除對方
             supabase.table("waiting_users") \
                 .delete() \
                 .eq("user_id", partner) \
@@ -117,7 +143,9 @@ def handle_text(event):
             reply(event.reply_token, "✅ 配對成功！")
             push_text(partner, "✅ 配對成功！")
 
+        # =========================
         # 沒人等待
+        # =========================
         else:
 
             supabase.table("waiting_users") \
@@ -130,7 +158,6 @@ def handle_text(event):
 
         return
 
-
     # =========================
     # 離開聊天
     # =========================
@@ -139,8 +166,10 @@ def handle_text(event):
         result = supabase.table("chat_pairs") \
             .select("*") \
             .eq("user_id", user_id) \
+            .limit(1) \
             .execute()
 
+        # 沒有聊天對象
         if not result.data:
 
             reply(event.reply_token, "目前沒有聊天對象")
@@ -148,19 +177,25 @@ def handle_text(event):
 
         partner = result.data[0]["partner_id"]
 
-        # 刪除雙方配對
+        # 刪除自己的聊天室
         supabase.table("chat_pairs") \
             .delete() \
             .eq("user_id", user_id) \
             .execute()
 
+        # 刪除對方聊天室
         supabase.table("chat_pairs") \
             .delete() \
             .eq("user_id", partner) \
             .execute()
 
-        push_text(partner, "對方已離開聊天")
-        reply(event.reply_token, "你已離開聊天")
+        # 通知對方
+        try:
+            push_text(partner, "⚠️ 對方已離開聊天")
+        except:
+            pass
+
+        reply(event.reply_token, "✅ 你已離開聊天")
 
         return
 
@@ -170,6 +205,7 @@ def handle_text(event):
     result = supabase.table("chat_pairs") \
         .select("*") \
         .eq("user_id", user_id) \
+        .limit(1) \
         .execute()
 
     if result.data:
@@ -194,6 +230,7 @@ def handle_sticker(event):
     result = supabase.table("chat_pairs") \
         .select("*") \
         .eq("user_id", user_id) \
+        .limit(1) \
         .execute()
 
     if not result.data:
@@ -230,6 +267,7 @@ def handle_image(event):
     result = supabase.table("chat_pairs") \
         .select("*") \
         .eq("user_id", user_id) \
+        .limit(1) \
         .execute()
 
     if not result.data:
@@ -251,6 +289,7 @@ def handle_audio(event):
     result = supabase.table("chat_pairs") \
         .select("*") \
         .eq("user_id", user_id) \
+        .limit(1) \
         .execute()
 
     if not result.data:
@@ -272,6 +311,7 @@ def handle_video(event):
     result = supabase.table("chat_pairs") \
         .select("*") \
         .eq("user_id", user_id) \
+        .limit(1) \
         .execute()
 
     if not result.data:
