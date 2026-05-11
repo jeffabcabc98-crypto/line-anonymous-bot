@@ -1,3 +1,4 @@
+```python id="0zh5wy"
 from flask import Flask, request
 import os
 import requests
@@ -237,11 +238,42 @@ def handle_sticker(event):
         print(package_id)
         print(sticker_id)
 
-        # 官方貼圖圖片網址
-        sticker_url = (
-            f"https://stickershop.line-scdn.net/"
-            f"stickershop/v1/sticker/{sticker_id}/ANDROID/sticker.png"
-        )
+        # 多種貼圖網址
+        urls = [
+
+            # 一般貼圖
+            f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/ANDROID/sticker.png",
+
+            # 動態貼圖
+            f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/IOS/sticker_animation.png",
+
+            # Popup貼圖
+            f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/IOS/sticker_popup.png",
+
+            # Emoji表情貼
+            f"https://stickershop.line-scdn.net/sticonshop/v1/sticon/{sticker_id}/iPhone/001.png"
+        ]
+
+        sticker_url = None
+
+        # 找可用網址
+        for url in urls:
+
+            response = requests.get(url)
+
+            print(url)
+            print(response.status_code)
+
+            if response.status_code == 200:
+
+                sticker_url = url
+                break
+
+        # 全失敗
+        if not sticker_url:
+
+            push_text(partner, "🎭 對方傳送了一個特殊表情")
+            return
 
         print("找到貼圖網址:")
         print(sticker_url)
@@ -435,3 +467,4 @@ def push_text(user_id, text):
 if __name__ == "__main__":
 
     app.run(host="0.0.0.0", port=5000)
+```
