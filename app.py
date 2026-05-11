@@ -1,3 +1,4 @@
+
 from flask import Flask, request
 import os
 import requests
@@ -124,7 +125,7 @@ def handle_text(event):
                 .eq("user_id", partner) \
                 .execute()
 
-            # 建立聊天室配對
+            # 建立聊天室
             supabase.table("chat_pairs").insert([
                 {
                     "user_id": user_id,
@@ -163,7 +164,6 @@ def handle_text(event):
             .limit(1) \
             .execute()
 
-        # 沒有聊天對象
         if not result.data:
 
             reply(event.reply_token, "目前沒有聊天對象")
@@ -171,19 +171,17 @@ def handle_text(event):
 
         partner = result.data[0]["partner_id"]
 
-        # 刪除自己的聊天室
+        # 刪除雙方聊天室
         supabase.table("chat_pairs") \
             .delete() \
             .eq("user_id", user_id) \
             .execute()
 
-        # 刪除對方聊天室
         supabase.table("chat_pairs") \
             .delete() \
             .eq("user_id", partner) \
             .execute()
 
-        # 通知對方
         try:
             push_text(partner, "⚠️ 對方已離開聊天")
         except:
@@ -194,7 +192,7 @@ def handle_text(event):
         return
 
     # =========================
-    # 一般聊天訊息
+    # 一般聊天
     # =========================
     result = supabase.table("chat_pairs") \
         .select("*") \
@@ -219,34 +217,50 @@ def handle_text(event):
 @handler.add(MessageEvent, message=StickerMessageContent)
 def handle_sticker(event):
 
-    user_id = event.source.user_id
+    try:
 
-    result = supabase.table("chat_pairs") \
-        .select("*") \
-        .eq("user_id", user_id) \
-        .limit(1) \
-        .execute()
+        user_id = event.source.user_id
 
-    if not result.data:
-        return
+        result = supabase.table("chat_pairs") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .limit(1) \
+            .execute()
 
-    partner = result.data[0]["partner_id"]
+        if not result.data:
+            return
 
-    with ApiClient(configuration) as api_client:
+        partner = result.data[0]["partner_id"]
 
-        line_bot_api = MessagingApi(api_client)
+        package_id = str(event.message.package_id)
+        sticker_id = str(event.message.sticker_id)
 
-        line_bot_api.push_message(
-            PushMessageRequest(
-                to=partner,
-                messages=[
-                    StickerMessage(
-                        package_id=event.message.package_id,
-                        sticker_id=event.message.sticker_id
-                    )
-                ]
+        print("貼圖")
+        print(package_id)
+        print(sticker_id)
+
+        with ApiClient(configuration) as api_client:
+
+            line_bot_api = MessagingApi(api_client)
+
+            line_bot_api.push_message(
+                PushMessageRequest(
+                    to=partner,
+                    messages=[
+                        StickerMessage(
+                            package_id=package_id,
+                            sticker_id=sticker_id
+                        )
+                    ]
+                )
             )
-        )
+
+        print("貼圖成功轉發")
+
+    except Exception as e:
+
+        print("貼圖錯誤")
+        print(e)
 
 
 # =========================
@@ -259,7 +273,6 @@ def handle_image(event):
 
         user_id = event.source.user_id
 
-        # 查詢聊天對象
         result = supabase.table("chat_pairs") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -271,40 +284,45 @@ def handle_image(event):
 
         partner = result.data[0]["partner_id"]
 
-        # LINE 圖片內容 API
         message_id = event.message.id
 
+        print("圖片 message_id:")
+        print(message_id)
+
         headers = {
-            "Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}"
+            "Authorization": "Bearer " + CHANNEL_ACCESS_TOKEN
         }
 
-        # 下載圖片
-        response = requests.get(
-            f"https://api-data.line.me/v2/bot/message/{message_id}/content",
-            headers=headers
-        )
+        url = f"https://api-data.line.me/v2/bot/message/{message_id}/content"
+
+        print(url)
+
+        response = requests.get(url, headers=headers)
+
+        print("status:")
+        print(response.status_code)
 
         if response.status_code != 200:
 
             print("圖片下載失敗")
+            print(response.text)
             return
 
-        # 隨機檔名
         filename = f"{uuid.uuid4()}.jpg"
 
-        # 上傳到 Supabase Storage
         supabase.storage.from_("chat-images").upload(
             filename,
             response.content,
             {"content-type": "image/jpeg"}
         )
 
-        # 取得公開網址
         image_url = supabase.storage.from_("chat-images").get_public_url(filename)
+
+        if isinstance(image_url, dict):
+            image_url = image_url["publicUrl"]
 
         print(image_url)
 
-        # 傳送圖片給對方
         with ApiClient(configuration) as api_client:
 
             line_bot_api = MessagingApi(api_client)
