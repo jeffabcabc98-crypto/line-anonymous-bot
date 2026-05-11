@@ -29,7 +29,6 @@ from linebot.v3.webhooks import (
 )
 
 from linebot.exceptions import InvalidSignatureError
-
 from supabase import create_client
 
 app = Flask(__name__)
@@ -158,13 +157,11 @@ def handle_text(event):
                 partner = result.data[0]["partner_id"]
                 nickname = result.data[0]["nickname"]
 
-                # 傳文字
                 push_text(
                     partner,
                     f"{nickname}：{text}"
                 )
 
-                # 傳 emoji 圖
                 for emoji in event.message.emojis:
 
                     product_id = emoji.product_id
@@ -194,8 +191,6 @@ def handle_text(event):
                             )
 
                     except Exception as e:
-
-                        print("emoji錯誤")
                         print(e)
 
             return
@@ -223,16 +218,43 @@ def handle_text(event):
 
                 msg += f"{i}. {nickname}\n"
 
-            msg += "\n輸入：\n解除封鎖 編號"
+            reply(event.reply_token, msg)
+
+            return
+
+        # =========================
+        # 解除封鎖選單
+        # =========================
+        if text == "解除封鎖":
+
+            result = supabase.table("blacklist") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .execute()
+
+            if not result.data:
+
+                reply(event.reply_token, "✅ 目前沒有封鎖任何人")
+                return
+
+            msg = "🔓 請選擇要解除封鎖的人：\n\n"
+
+            for i, row in enumerate(result.data, start=1):
+
+                nickname = row["nickname"]
+
+                msg += f"{i}. {nickname}\n"
+
+            msg += "\n輸入：\n解除 編號"
 
             reply(event.reply_token, msg)
 
             return
 
         # =========================
-        # 單獨解除封鎖
+        # 單獨解除
         # =========================
-        if text.startswith("解除封鎖"):
+        if text.startswith("解除 "):
 
             try:
 
@@ -240,7 +262,7 @@ def handle_text(event):
 
                 if len(parts) < 2:
 
-                    reply(event.reply_token, "格式：解除封鎖 編號")
+                    reply(event.reply_token, "格式：解除 編號")
                     return
 
                 index = int(parts[1]) - 1
@@ -262,16 +284,22 @@ def handle_text(event):
 
                 target = result.data[index]
 
+                nickname = target["nickname"]
+
                 supabase.table("blacklist") \
                     .delete() \
                     .eq("id", target["id"]) \
                     .execute()
 
-                reply(event.reply_token, "✅ 已解除封鎖")
+                reply(
+                    event.reply_token,
+                    f"✅ 已解除封鎖 {nickname}"
+                )
 
             except Exception as e:
 
                 print(e)
+
                 reply(event.reply_token, "解除失敗")
 
             return
@@ -295,14 +323,12 @@ def handle_text(event):
             partner = result.data[0]["partner_id"]
             nickname = result.data[0]["partner_nickname"]
 
-            # 加入黑名單
             supabase.table("blacklist").insert({
                 "user_id": user_id,
                 "blocked_user_id": partner,
                 "nickname": nickname
             }).execute()
 
-            # 離開聊天室
             supabase.table("chat_pairs") \
                 .delete() \
                 .eq("user_id", user_id) \
@@ -330,7 +356,6 @@ def handle_text(event):
         # =========================
         if text == "開始":
 
-            # 已在等待池
             check_waiting = supabase.table("waiting_users") \
                 .select("*") \
                 .eq("user_id", user_id) \
@@ -341,7 +366,6 @@ def handle_text(event):
                 reply(event.reply_token, "⏳ 你已經在等待配對中了")
                 return
 
-            # 已在聊天
             check_chat = supabase.table("chat_pairs") \
                 .select("*") \
                 .eq("user_id", user_id) \
@@ -352,7 +376,6 @@ def handle_text(event):
                 reply(event.reply_token, "💬 你目前已經在聊天中了")
                 return
 
-            # 找等待中的人
             waiting_users = supabase.table("waiting_users") \
                 .select("*") \
                 .neq("user_id", user_id) \
@@ -364,14 +387,12 @@ def handle_text(event):
 
                 target = row["user_id"]
 
-                # 我封鎖對方？
                 check1 = supabase.table("blacklist") \
                     .select("*") \
                     .eq("user_id", user_id) \
                     .eq("blocked_user_id", target) \
                     .execute()
 
-                # 對方封鎖我？
                 check2 = supabase.table("blacklist") \
                     .select("*") \
                     .eq("user_id", target) \
@@ -384,10 +405,8 @@ def handle_text(event):
                 partner = target
                 break
 
-            # 有人等待
             if partner:
 
-                # 一小時內不重複配對
                 one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
 
                 recent = supabase.table("recent_pairs") \
@@ -414,17 +433,14 @@ def handle_text(event):
 
                     return
 
-                # 移除等待池
                 supabase.table("waiting_users") \
                     .delete() \
                     .eq("user_id", partner) \
                     .execute()
 
-                # 隨機暱稱
                 nickname1 = generate_nickname()
                 nickname2 = generate_nickname()
 
-                # 建立聊天室
                 supabase.table("chat_pairs").insert([
                     {
                         "user_id": user_id,
@@ -440,7 +456,6 @@ def handle_text(event):
                     }
                 ]).execute()
 
-                # 記錄最近配對
                 supabase.table("recent_pairs").insert({
                     "user1": user_id,
                     "user2": partner
@@ -534,9 +549,6 @@ def handle_text(event):
         print(e)
 
 
-# =========================
-# LINE貼圖
-# =========================
 @handler.add(MessageEvent, message=StickerMessageContent)
 def handle_sticker(event):
 
@@ -597,56 +609,8 @@ def handle_sticker(event):
 
             return
 
-        except Exception:
+        except:
             pass
-
-        urls = [
-
-            f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/ANDROID/sticker.png",
-
-            f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/IOS/sticker_animation.png",
-
-            f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/IOS/sticker_popup.png",
-
-            f"https://stickershop.line-scdn.net/sticonshop/v1/sticon/{sticker_id}/iPhone/001.png"
-        ]
-
-        sticker_url = None
-
-        for url in urls:
-
-            try:
-
-                response = requests.get(url, timeout=10)
-
-                if response.status_code == 200:
-
-                    sticker_url = url
-                    break
-
-            except:
-                pass
-
-        if not sticker_url:
-
-            push_text(partner, "🎭 對方傳送了一個特殊貼圖")
-            return
-
-        with ApiClient(configuration) as api_client:
-
-            line_bot_api = MessagingApi(api_client)
-
-            line_bot_api.push_message(
-                PushMessageRequest(
-                    to=partner,
-                    messages=[
-                        ImageMessage(
-                            original_content_url=sticker_url,
-                            preview_image_url=sticker_url
-                        )
-                    ]
-                )
-            )
 
     except Exception as e:
 
@@ -654,9 +618,6 @@ def handle_sticker(event):
         print(e)
 
 
-# =========================
-# 圖片
-# =========================
 @handler.add(MessageEvent, message=ImageMessageContent)
 def handle_image(event):
 
@@ -702,7 +663,10 @@ def handle_image(event):
         if isinstance(image_url, dict):
             image_url = image_url["publicUrl"]
 
-        push_text(partner, f"{nickname}：傳送了一張圖片")
+        push_text(
+            partner,
+            f"🖼️ {nickname} 傳送了一張圖片"
+        )
 
         with ApiClient(configuration) as api_client:
 
@@ -726,9 +690,6 @@ def handle_image(event):
         print(e)
 
 
-# =========================
-# 語音
-# =========================
 @handler.add(MessageEvent, message=AudioMessageContent)
 def handle_audio(event):
 
@@ -748,7 +709,10 @@ def handle_audio(event):
         partner = result.data[0]["partner_id"]
         nickname = result.data[0]["nickname"]
 
-        push_text(partner, f"🎤 {nickname} 傳送了一段語音")
+        push_text(
+            partner,
+            f"🎤 {nickname} 傳送了一段語音"
+        )
 
     except Exception as e:
 
@@ -756,9 +720,6 @@ def handle_audio(event):
         print(e)
 
 
-# =========================
-# 影片
-# =========================
 @handler.add(MessageEvent, message=VideoMessageContent)
 def handle_video(event):
 
@@ -778,7 +739,10 @@ def handle_video(event):
         partner = result.data[0]["partner_id"]
         nickname = result.data[0]["nickname"]
 
-        push_text(partner, f"🎬 {nickname} 傳送了一段影片")
+        push_text(
+            partner,
+            f"🎬 {nickname} 傳送了一段影片"
+        )
 
     except Exception as e:
 
@@ -786,9 +750,6 @@ def handle_video(event):
         print(e)
 
 
-# =========================
-# Reply
-# =========================
 def reply(reply_token, text):
 
     try:
@@ -808,13 +769,9 @@ def reply(reply_token, text):
 
     except Exception as e:
 
-        print("reply錯誤")
         print(e)
 
 
-# =========================
-# Push Text
-# =========================
 def push_text(user_id, text):
 
     try:
@@ -834,13 +791,9 @@ def push_text(user_id, text):
 
     except Exception as e:
 
-        print("push錯誤")
         print(e)
 
 
-# =========================
-# Run
-# =========================
 if __name__ == "__main__":
 
     app.run(
