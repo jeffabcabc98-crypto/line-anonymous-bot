@@ -8,7 +8,8 @@ from linebot.v3.messaging import (
     MessagingApi,
     ReplyMessageRequest,
     PushMessageRequest,
-    TextMessage
+    TextMessage,
+    StickerMessage
 )
 
 from linebot.v3.webhooks import (
@@ -78,9 +79,7 @@ def handle_text(event):
 
         print("開始配對")
 
-        # =========================
         # 檢查是否已在等待池
-        # =========================
         check_waiting = supabase.table("waiting_users") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -91,9 +90,7 @@ def handle_text(event):
             reply(event.reply_token, "⏳ 你已經在等待配對中了")
             return
 
-        # =========================
         # 檢查是否已在聊天中
-        # =========================
         check_chat = supabase.table("chat_pairs") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -104,9 +101,7 @@ def handle_text(event):
             reply(event.reply_token, "💬 你目前已經在聊天中了")
             return
 
-        # =========================
         # 找等待中的人
-        # =========================
         result = supabase.table("waiting_users") \
             .select("*") \
             .neq("user_id", user_id) \
@@ -115,9 +110,7 @@ def handle_text(event):
 
         print(result.data)
 
-        # =========================
         # 有人等待
-        # =========================
         if result.data:
 
             partner = result.data[0]["user_id"]
@@ -143,9 +136,7 @@ def handle_text(event):
             reply(event.reply_token, "✅ 配對成功！")
             push_text(partner, "✅ 配對成功！")
 
-        # =========================
         # 沒人等待
-        # =========================
         else:
 
             supabase.table("waiting_users") \
@@ -246,11 +237,10 @@ def handle_sticker(event):
             PushMessageRequest(
                 to=partner,
                 messages=[
-                    {
-                        "type": "sticker",
-                        "packageId": event.message.package_id,
-                        "stickerId": event.message.sticker_id
-                    }
+                    StickerMessage(
+                        package_id=event.message.package_id,
+                        sticker_id=event.message.sticker_id
+                    )
                 ]
             )
         )
