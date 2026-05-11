@@ -11,7 +11,8 @@ from linebot.v3.messaging import (
     ReplyMessageRequest,
     PushMessageRequest,
     TextMessage,
-    ImageMessage
+    ImageMessage,
+    StickerMessage
 )
 
 from linebot.v3.webhooks import (
@@ -98,7 +99,7 @@ def handle_text(event):
                 # 先傳文字
                 push_text(partner, text)
 
-                # 再傳所有 emoji 圖片
+                # 再傳 emoji 圖片
                 for emoji in event.message.emojis:
 
                     product_id = emoji.product_id
@@ -147,7 +148,7 @@ def handle_text(event):
 
             print("開始配對")
 
-            # 檢查是否已在等待池
+            # 已在等待池
             check_waiting = supabase.table("waiting_users") \
                 .select("*") \
                 .eq("user_id", user_id) \
@@ -158,7 +159,7 @@ def handle_text(event):
                 reply(event.reply_token, "⏳ 你已經在等待配對中了")
                 return
 
-            # 檢查是否已在聊天中
+            # 已在聊天
             check_chat = supabase.table("chat_pairs") \
                 .select("*") \
                 .eq("user_id", user_id) \
@@ -183,7 +184,7 @@ def handle_text(event):
 
                 partner = result.data[0]["user_id"]
 
-                # 從等待池移除對方
+                # 移除等待池
                 supabase.table("waiting_users") \
                     .delete() \
                     .eq("user_id", partner) \
@@ -204,7 +205,6 @@ def handle_text(event):
                 reply(event.reply_token, "✅ 配對成功！")
                 push_text(partner, "✅ 配對成功！")
 
-            # 沒人等待
             else:
 
                 supabase.table("waiting_users") \
@@ -235,7 +235,7 @@ def handle_text(event):
 
             partner = result.data[0]["partner_id"]
 
-            # 刪除雙方聊天室
+            # 刪除聊天室
             supabase.table("chat_pairs") \
                 .delete() \
                 .eq("user_id", user_id) \
@@ -281,7 +281,7 @@ def handle_text(event):
 
 
 # =========================
-# LINE貼圖 → 圖片
+# LINE貼圖 → 原生優先 + 圖片備援
 # =========================
 @handler.add(MessageEvent, message=StickerMessageContent)
 def handle_sticker(event):
@@ -308,7 +308,40 @@ def handle_sticker(event):
         print(package_id)
         print(sticker_id)
 
-        # 多種貼圖網址
+        # =========================
+        # 第一階段：原生貼圖
+        # =========================
+        try:
+
+            print("嘗試原生貼圖")
+
+            with ApiClient(configuration) as api_client:
+
+                line_bot_api = MessagingApi(api_client)
+
+                line_bot_api.push_message(
+                    PushMessageRequest(
+                        to=partner,
+                        messages=[
+                            StickerMessage(
+                                package_id=package_id,
+                                sticker_id=sticker_id
+                            )
+                        ]
+                    )
+                )
+
+            print("原生貼圖成功")
+            return
+
+        except Exception as native_error:
+
+            print("原生貼圖失敗")
+            print(native_error)
+
+        # =========================
+        # 第二階段：圖片備援
+        # =========================
         urls = [
 
             # 一般貼圖
@@ -326,28 +359,35 @@ def handle_sticker(event):
 
         sticker_url = None
 
-        # 找可用網址
         for url in urls:
 
-            response = requests.get(url)
+            try:
 
-            print(url)
-            print(response.status_code)
+                response = requests.get(url, timeout=10)
 
-            if response.status_code == 200:
+                print(url)
+                print(response.status_code)
 
-                sticker_url = url
-                break
+                if response.status_code == 200:
+
+                    sticker_url = url
+                    break
+
+            except Exception as e:
+
+                print("網址測試失敗")
+                print(e)
 
         # 全失敗
         if not sticker_url:
 
-            push_text(partner, "🎭 對方傳送了一個特殊表情")
+            push_text(partner, "🎭 對方傳送了一個特殊貼圖")
             return
 
         print("找到貼圖網址:")
         print(sticker_url)
 
+        # 傳送圖片版貼圖
         with ApiClient(configuration) as api_client:
 
             line_bot_api = MessagingApi(api_client)
@@ -364,7 +404,7 @@ def handle_sticker(event):
                 )
             )
 
-        print("貼圖成功轉圖片")
+        print("圖片貼圖成功")
 
     except Exception as e:
 
