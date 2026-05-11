@@ -94,7 +94,6 @@ def handle_text(event):
         # =========================
         if hasattr(event.message, "emojis") and event.message.emojis:
 
-            # 冷卻檢查
             now = time.time()
 
             if user_id in sticker_cooldown:
@@ -164,6 +163,126 @@ def handle_text(event):
             return
 
         # =========================
+        # 封鎖名單
+        # =========================
+        if text == "封鎖名單":
+
+            result = supabase.table("blacklist") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .execute()
+
+            if not result.data:
+
+                reply(event.reply_token, "✅ 目前沒有封鎖任何人")
+                return
+
+            msg = "🚫 封鎖名單：\n\n"
+
+            for i, row in enumerate(result.data, start=1):
+
+                blocked = row["blocked_user_id"]
+
+                msg += f"{i}. {blocked[:10]}...\n"
+
+            msg += "\n輸入：\n解除封鎖 編號"
+
+            reply(event.reply_token, msg)
+
+            return
+
+        # =========================
+        # 單獨解除封鎖
+        # =========================
+        if text.startswith("解除封鎖"):
+
+            try:
+
+                parts = text.split()
+
+                if len(parts) < 2:
+
+                    reply(event.reply_token, "格式：解除封鎖 編號")
+                    return
+
+                index = int(parts[1]) - 1
+
+                result = supabase.table("blacklist") \
+                    .select("*") \
+                    .eq("user_id", user_id) \
+                    .execute()
+
+                if not result.data:
+
+                    reply(event.reply_token, "沒有封鎖名單")
+                    return
+
+                if index < 0 or index >= len(result.data):
+
+                    reply(event.reply_token, "編號不存在")
+                    return
+
+                target = result.data[index]
+
+                supabase.table("blacklist") \
+                    .delete() \
+                    .eq("id", target["id"]) \
+                    .execute()
+
+                reply(event.reply_token, "✅ 已解除封鎖")
+
+            except Exception as e:
+
+                print(e)
+                reply(event.reply_token, "解除失敗")
+
+            return
+
+        # =========================
+        # 封鎖對方
+        # =========================
+        if text == "封鎖":
+
+            result = supabase.table("chat_pairs") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .limit(1) \
+                .execute()
+
+            if not result.data:
+
+                reply(event.reply_token, "目前沒有聊天對象")
+                return
+
+            partner = result.data[0]["partner_id"]
+
+            # 加入黑名單
+            supabase.table("blacklist").insert({
+                "user_id": user_id,
+                "blocked_user_id": partner
+            }).execute()
+
+            # 離開聊天室
+            supabase.table("chat_pairs") \
+                .delete() \
+                .eq("user_id", user_id) \
+                .execute()
+
+            supabase.table("chat_pairs") \
+                .delete() \
+                .eq("user_id", partner) \
+                .execute()
+
+            reply(event.reply_token, "🚫 已封鎖該使用者")
+
+            try:
+                push_text(partner, "⚠️ 對方已離開聊天")
+            except:
+                pass
+
+            return
+
+        # =========================
         # 開始配對
         # =========================
         if text == "開始":
@@ -193,18 +312,39 @@ def handle_text(event):
                 return
 
             # 找等待中的人
-            result = supabase.table("waiting_users") \
+            waiting_users = supabase.table("waiting_users") \
                 .select("*") \
                 .neq("user_id", user_id) \
-                .limit(1) \
                 .execute()
 
-            print(result.data)
+            partner = None
+
+            for row in waiting_users.data:
+
+                target = row["user_id"]
+
+                # 我封鎖對方？
+                check1 = supabase.table("blacklist") \
+                    .select("*") \
+                    .eq("user_id", user_id) \
+                    .eq("blocked_user_id", target) \
+                    .execute()
+
+                # 對方封鎖我？
+                check2 = supabase.table("blacklist") \
+                    .select("*") \
+                    .eq("user_id", target) \
+                    .eq("blocked_user_id", user_id) \
+                    .execute()
+
+                if check1.data or check2.data:
+                    continue
+
+                partner = target
+                break
 
             # 有人等待
-            if result.data:
-
-                partner = result.data[0]["user_id"]
+            if partner:
 
                 # =========================
                 # 防止一小時內重複配對
@@ -220,12 +360,10 @@ def handle_text(event):
                     .gte("created_at", one_hour_ago.isoformat()) \
                     .execute()
 
-                # 一小時內配對過
                 if recent.data:
 
                     print("一小時內配對過")
 
-                    # 對方放回等待池
                     supabase.table("waiting_users") \
                         .upsert({
                             "user_id": partner
@@ -296,7 +434,6 @@ def handle_text(event):
 
             partner = result.data[0]["partner_id"]
 
-            # 刪除聊天室
             supabase.table("chat_pairs") \
                 .delete() \
                 .eq("user_id", user_id) \
@@ -385,10 +522,6 @@ def handle_sticker(event):
         package_id = str(event.message.package_id)
         sticker_id = str(event.message.sticker_id)
 
-        print("貼圖")
-        print(package_id)
-        print(sticker_id)
-
         # =========================
         # 原生貼圖
         # =========================
@@ -410,12 +543,10 @@ def handle_sticker(event):
                     )
                 )
 
-            print("原生貼圖成功")
             return
 
         except Exception as native_error:
 
-            print("原生貼圖失敗")
             print(native_error)
 
         # =========================
@@ -423,16 +554,12 @@ def handle_sticker(event):
         # =========================
         urls = [
 
-            # 一般貼圖
             f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/ANDROID/sticker.png",
 
-            # 動態貼圖
             f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/IOS/sticker_animation.png",
 
-            # Popup
             f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/IOS/sticker_popup.png",
 
-            # 表情貼
             f"https://stickershop.line-scdn.net/sticonshop/v1/sticon/{sticker_id}/iPhone/001.png"
         ]
 
@@ -444,9 +571,6 @@ def handle_sticker(event):
 
                 response = requests.get(url, timeout=10)
 
-                print(url)
-                print(response.status_code)
-
                 if response.status_code == 200:
 
                     sticker_url = url
@@ -454,7 +578,6 @@ def handle_sticker(event):
 
             except Exception as e:
 
-                print("網址測試失敗")
                 print(e)
 
         if not sticker_url:
@@ -477,8 +600,6 @@ def handle_sticker(event):
                     ]
                 )
             )
-
-        print("圖片貼圖成功")
 
     except Exception as e:
 
@@ -518,9 +639,6 @@ def handle_image(event):
         response = requests.get(url, headers=headers)
 
         if response.status_code != 200:
-
-            print("圖片下載失敗")
-            print(response.text)
             return
 
         filename = f"{uuid.uuid4()}.jpg"
@@ -551,8 +669,6 @@ def handle_image(event):
                     ]
                 )
             )
-
-        print("圖片成功轉發")
 
     except Exception as e:
 
