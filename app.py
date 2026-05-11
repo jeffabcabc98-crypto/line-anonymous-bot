@@ -91,8 +91,16 @@ if result.data:
         .execute()
 
     # 建立配對
-    pairs[user_id] = partner
-    pairs[partner] = user_id
+supabase.table("chat_pairs").insert([
+    {
+        "user_id": user_id,
+        "partner_id": partner
+    },
+    {
+        "user_id": partner,
+        "partner_id": user_id
+    }
+]).execute()
 
     reply(event.reply_token, "✅ 配對成功！")
     push_text(partner, "✅ 配對成功！")
