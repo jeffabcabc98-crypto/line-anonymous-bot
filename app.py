@@ -12,6 +12,9 @@ import os
 CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
 CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
 
+print("TOKEN:", CHANNEL_ACCESS_TOKEN)
+print("SECRET:", CHANNEL_SECRET)
+
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
