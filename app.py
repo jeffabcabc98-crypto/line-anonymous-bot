@@ -2,6 +2,7 @@ from flask import Flask, request
 import os
 import requests
 import uuid
+import time
 
 from linebot.v3 import WebhookHandler
 from linebot.v3.messaging import (
@@ -29,6 +30,11 @@ from linebot.exceptions import InvalidSignatureError
 from supabase import create_client
 
 app = Flask(__name__)
+
+# =========================
+# 貼圖 / 表情貼 冷卻時間
+# =========================
+sticker_cooldown = {}
 
 # =========================
 # Railway Variables
@@ -85,6 +91,27 @@ def handle_text(event):
         # LINE Emoji 表情貼
         # =========================
         if hasattr(event.message, "emojis") and event.message.emojis:
+
+            # 冷卻檢查
+            now = time.time()
+
+            if user_id in sticker_cooldown:
+
+                diff = now - sticker_cooldown[user_id]
+
+                if diff < 5:
+
+                    remain = round(5 - diff, 1)
+
+                    reply(
+                        event.reply_token,
+                        f"⏳ 你的手速太快了，請 {remain} 秒後再試"
+                    )
+
+                    return
+
+            # 更新時間
+            sticker_cooldown[user_id] = now
 
             result = supabase.table("chat_pairs") \
                 .select("*") \
@@ -148,7 +175,6 @@ def handle_text(event):
 
             print("開始配對")
 
-            # 已在等待池
             check_waiting = supabase.table("waiting_users") \
                 .select("*") \
                 .eq("user_id", user_id) \
@@ -159,7 +185,6 @@ def handle_text(event):
                 reply(event.reply_token, "⏳ 你已經在等待配對中了")
                 return
 
-            # 已在聊天
             check_chat = supabase.table("chat_pairs") \
                 .select("*") \
                 .eq("user_id", user_id) \
@@ -170,7 +195,6 @@ def handle_text(event):
                 reply(event.reply_token, "💬 你目前已經在聊天中了")
                 return
 
-            # 找等待中的人
             result = supabase.table("waiting_users") \
                 .select("*") \
                 .neq("user_id", user_id) \
@@ -179,18 +203,15 @@ def handle_text(event):
 
             print(result.data)
 
-            # 有人等待
             if result.data:
 
                 partner = result.data[0]["user_id"]
 
-                # 移除等待池
                 supabase.table("waiting_users") \
                     .delete() \
                     .eq("user_id", partner) \
                     .execute()
 
-                # 建立聊天室
                 supabase.table("chat_pairs").insert([
                     {
                         "user_id": user_id,
@@ -235,7 +256,6 @@ def handle_text(event):
 
             partner = result.data[0]["partner_id"]
 
-            # 刪除聊天室
             supabase.table("chat_pairs") \
                 .delete() \
                 .eq("user_id", user_id) \
@@ -290,6 +310,27 @@ def handle_sticker(event):
 
         user_id = event.source.user_id
 
+        # 冷卻檢查
+        now = time.time()
+
+        if user_id in sticker_cooldown:
+
+            diff = now - sticker_cooldown[user_id]
+
+            if diff < 5:
+
+                remain = round(5 - diff, 1)
+
+                push_text(
+                    user_id,
+                    f"⏳ 你的手速太快了，請 {remain} 秒後再試"
+                )
+
+                return
+
+        # 更新時間
+        sticker_cooldown[user_id] = now
+
         result = supabase.table("chat_pairs") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -309,7 +350,7 @@ def handle_sticker(event):
         print(sticker_id)
 
         # =========================
-        # 第一階段：原生貼圖
+        # 原生貼圖
         # =========================
         try:
 
@@ -340,20 +381,16 @@ def handle_sticker(event):
             print(native_error)
 
         # =========================
-        # 第二階段：圖片備援
+        # 圖片備援
         # =========================
         urls = [
 
-            # 一般貼圖
             f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/ANDROID/sticker.png",
 
-            # 動態貼圖
             f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/IOS/sticker_animation.png",
 
-            # Popup貼圖
             f"https://stickershop.line-scdn.net/stickershop/v1/sticker/{sticker_id}/IOS/sticker_popup.png",
 
-            # Emoji表情貼
             f"https://stickershop.line-scdn.net/sticonshop/v1/sticon/{sticker_id}/iPhone/001.png"
         ]
 
@@ -378,7 +415,6 @@ def handle_sticker(event):
                 print("網址測試失敗")
                 print(e)
 
-        # 全失敗
         if not sticker_url:
 
             push_text(partner, "🎭 對方傳送了一個特殊貼圖")
@@ -387,7 +423,6 @@ def handle_sticker(event):
         print("找到貼圖網址:")
         print(sticker_url)
 
-        # 傳送圖片版貼圖
         with ApiClient(configuration) as api_client:
 
             line_bot_api = MessagingApi(api_client)
