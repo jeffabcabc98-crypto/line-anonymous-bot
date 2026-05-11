@@ -1,5 +1,7 @@
 from flask import Flask, request
 import os
+import requests
+import uuid
 
 from linebot.v3 import WebhookHandler
 from linebot.v3.messaging import (
@@ -9,7 +11,8 @@ from linebot.v3.messaging import (
     ReplyMessageRequest,
     PushMessageRequest,
     TextMessage,
-    StickerMessage
+    StickerMessage,
+    ImageMessage
 )
 
 from linebot.v3.webhooks import (
@@ -252,20 +255,78 @@ def handle_sticker(event):
 @handler.add(MessageEvent, message=ImageMessageContent)
 def handle_image(event):
 
-    user_id = event.source.user_id
+    try:
 
-    result = supabase.table("chat_pairs") \
-        .select("*") \
-        .eq("user_id", user_id) \
-        .limit(1) \
-        .execute()
+        user_id = event.source.user_id
 
-    if not result.data:
-        return
+        # 查詢聊天對象
+        result = supabase.table("chat_pairs") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .limit(1) \
+            .execute()
 
-    partner = result.data[0]["partner_id"]
+        if not result.data:
+            return
 
-    push_text(partner, "📷 對方傳送了一張圖片")
+        partner = result.data[0]["partner_id"]
+
+        # LINE 圖片內容 API
+        message_id = event.message.id
+
+        headers = {
+            "Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}"
+        }
+
+        # 下載圖片
+        response = requests.get(
+            f"https://api-data.line.me/v2/bot/message/{message_id}/content",
+            headers=headers
+        )
+
+        if response.status_code != 200:
+
+            print("圖片下載失敗")
+            return
+
+        # 隨機檔名
+        filename = f"{uuid.uuid4()}.jpg"
+
+        # 上傳到 Supabase Storage
+        supabase.storage.from_("chat-images").upload(
+            filename,
+            response.content,
+            {"content-type": "image/jpeg"}
+        )
+
+        # 取得公開網址
+        image_url = supabase.storage.from_("chat-images").get_public_url(filename)
+
+        print(image_url)
+
+        # 傳送圖片給對方
+        with ApiClient(configuration) as api_client:
+
+            line_bot_api = MessagingApi(api_client)
+
+            line_bot_api.push_message(
+                PushMessageRequest(
+                    to=partner,
+                    messages=[
+                        ImageMessage(
+                            original_content_url=image_url,
+                            preview_image_url=image_url
+                        )
+                    ]
+                )
+            )
+
+        print("圖片成功轉發")
+
+    except Exception as e:
+
+        print("圖片錯誤")
+        print(e)
 
 
 # =========================
