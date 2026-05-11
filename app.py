@@ -67,12 +67,12 @@ def generate_nickname():
 
 
 # =========================
-# 貼圖 / 表情貼 冷卻時間
+# 貼圖冷卻
 # =========================
 sticker_cooldown = {}
 
 # =========================
-# Railway Variables
+# Railway ENV
 # =========================
 CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
 CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
@@ -83,13 +83,19 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 # =========================
 # LINE
 # =========================
-configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
+configuration = Configuration(
+    access_token=CHANNEL_ACCESS_TOKEN
+)
+
 handler = WebhookHandler(CHANNEL_SECRET)
 
 # =========================
 # Supabase
 # =========================
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase = create_client(
+    SUPABASE_URL,
+    SUPABASE_KEY
+)
 
 
 @app.route("/callback", methods=['POST'])
@@ -99,12 +105,14 @@ def callback():
     body = request.get_data(as_text=True)
 
     try:
+
         handler.handle(body, signature)
 
     except InvalidSignatureError:
         return 'Invalid signature', 400
 
     except Exception as e:
+
         print("Webhook錯誤")
         print(e)
 
@@ -123,7 +131,27 @@ def handle_text(event):
         text = event.message.text.strip()
 
         # =========================
-        # LINE Emoji 表情貼
+        # 管理員封號檢查
+        # =========================
+        banned = supabase.table("banned_users") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .limit(1) \
+            .execute()
+
+        if banned.data:
+
+            reason = banned.data[0]["reason"]
+
+            reply(
+                event.reply_token,
+                f"🚫 你已被停權\n原因：{reason}"
+            )
+
+            return
+
+        # =========================
+        # Emoji 表情貼
         # =========================
         if hasattr(event.message, "emojis") and event.message.emojis:
 
@@ -407,7 +435,9 @@ def handle_text(event):
 
             if partner:
 
-                one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+                one_hour_ago = datetime.now(
+                    timezone.utc
+                ) - timedelta(hours=1)
 
                 recent = supabase.table("recent_pairs") \
                     .select("*") \
@@ -415,16 +445,13 @@ def handle_text(event):
                         f"and(user1.eq.{user_id},user2.eq.{partner}),"
                         f"and(user1.eq.{partner},user2.eq.{user_id})"
                     ) \
-                    .gte("created_at", one_hour_ago.isoformat()) \
+                    .gte(
+                        "created_at",
+                        one_hour_ago.isoformat()
+                    ) \
                     .execute()
 
                 if recent.data:
-
-                    supabase.table("waiting_users") \
-                        .upsert({
-                            "user_id": partner
-                        }) \
-                        .execute()
 
                     reply(
                         event.reply_token,
@@ -512,7 +539,10 @@ def handle_text(event):
                 .execute()
 
             try:
-                push_text(partner, "⚠️ 對方已離開聊天")
+                push_text(
+                    partner,
+                    "⚠️ 對方已離開聊天"
+                )
             except:
                 pass
 
@@ -541,7 +571,10 @@ def handle_text(event):
 
         else:
 
-            reply(event.reply_token, "輸入「開始」開始匿名聊天")
+            reply(
+                event.reply_token,
+                "輸入「開始」開始匿名聊天"
+            )
 
     except Exception as e:
 
@@ -549,31 +582,15 @@ def handle_text(event):
         print(e)
 
 
+# =========================
+# 貼圖
+# =========================
 @handler.add(MessageEvent, message=StickerMessageContent)
 def handle_sticker(event):
 
     try:
 
         user_id = event.source.user_id
-
-        now = time.time()
-
-        if user_id in sticker_cooldown:
-
-            diff = now - sticker_cooldown[user_id]
-
-            if diff < 5:
-
-                remain = round(5 - diff, 1)
-
-                push_text(
-                    user_id,
-                    f"⏳ 你的手速太快了，請 {remain} 秒後再試"
-                )
-
-                return
-
-        sticker_cooldown[user_id] = now
 
         result = supabase.table("chat_pairs") \
             .select("*") \
@@ -589,28 +606,21 @@ def handle_sticker(event):
         package_id = str(event.message.package_id)
         sticker_id = str(event.message.sticker_id)
 
-        try:
+        with ApiClient(configuration) as api_client:
 
-            with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
 
-                line_bot_api = MessagingApi(api_client)
-
-                line_bot_api.push_message(
-                    PushMessageRequest(
-                        to=partner,
-                        messages=[
-                            StickerMessage(
-                                package_id=package_id,
-                                sticker_id=sticker_id
-                            )
-                        ]
-                    )
+            line_bot_api.push_message(
+                PushMessageRequest(
+                    to=partner,
+                    messages=[
+                        StickerMessage(
+                            package_id=package_id,
+                            sticker_id=sticker_id
+                        )
+                    ]
                 )
-
-            return
-
-        except:
-            pass
+            )
 
     except Exception as e:
 
@@ -618,6 +628,9 @@ def handle_sticker(event):
         print(e)
 
 
+# =========================
+# 圖片
+# =========================
 @handler.add(MessageEvent, message=ImageMessageContent)
 def handle_image(event):
 
@@ -643,7 +656,10 @@ def handle_image(event):
             "Authorization": "Bearer " + CHANNEL_ACCESS_TOKEN
         }
 
-        url = f"https://api-data.line.me/v2/bot/message/{message_id}/content"
+        url = (
+            f"https://api-data.line.me/v2/bot/message/"
+            f"{message_id}/content"
+        )
 
         response = requests.get(url, headers=headers)
 
@@ -658,7 +674,9 @@ def handle_image(event):
             {"content-type": "image/jpeg"}
         )
 
-        image_url = supabase.storage.from_("chat-images").get_public_url(filename)
+        image_url = supabase.storage \
+            .from_("chat-images") \
+            .get_public_url(filename)
 
         if isinstance(image_url, dict):
             image_url = image_url["publicUrl"]
@@ -690,66 +708,9 @@ def handle_image(event):
         print(e)
 
 
-@handler.add(MessageEvent, message=AudioMessageContent)
-def handle_audio(event):
-
-    try:
-
-        user_id = event.source.user_id
-
-        result = supabase.table("chat_pairs") \
-            .select("*") \
-            .eq("user_id", user_id) \
-            .limit(1) \
-            .execute()
-
-        if not result.data:
-            return
-
-        partner = result.data[0]["partner_id"]
-        nickname = result.data[0]["nickname"]
-
-        push_text(
-            partner,
-            f"🎤 {nickname} 傳送了一段語音"
-        )
-
-    except Exception as e:
-
-        print("語音錯誤")
-        print(e)
-
-
-@handler.add(MessageEvent, message=VideoMessageContent)
-def handle_video(event):
-
-    try:
-
-        user_id = event.source.user_id
-
-        result = supabase.table("chat_pairs") \
-            .select("*") \
-            .eq("user_id", user_id) \
-            .limit(1) \
-            .execute()
-
-        if not result.data:
-            return
-
-        partner = result.data[0]["partner_id"]
-        nickname = result.data[0]["nickname"]
-
-        push_text(
-            partner,
-            f"🎬 {nickname} 傳送了一段影片"
-        )
-
-    except Exception as e:
-
-        print("影片錯誤")
-        print(e)
-
-
+# =========================
+# Reply
+# =========================
 def reply(reply_token, text):
 
     try:
@@ -768,10 +729,12 @@ def reply(reply_token, text):
             )
 
     except Exception as e:
-
         print(e)
 
 
+# =========================
+# Push Text
+# =========================
 def push_text(user_id, text):
 
     try:
@@ -790,10 +753,12 @@ def push_text(user_id, text):
             )
 
     except Exception as e:
-
         print(e)
 
 
+# =========================
+# Run
+# =========================
 if __name__ == "__main__":
 
     app.run(
