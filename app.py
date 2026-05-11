@@ -95,37 +95,48 @@ def handle_text(event):
 
                 partner = result.data[0]["partner_id"]
 
-                emoji = event.message.emojis[0]
+                # 先傳文字
+                push_text(partner, text)
 
-                product_id = emoji.product_id
-                emoji_id = emoji.emoji_id
+                # 再傳所有 emoji 圖片
+                for emoji in event.message.emojis:
 
-                print("表情貼")
-                print(product_id)
-                print(emoji_id)
+                    product_id = emoji.product_id
+                    emoji_id = emoji.emoji_id
 
-                emoji_url = (
-                    f"https://stickershop.line-scdn.net/"
-                    f"sticonshop/v1/sticon/{product_id}/iPhone/{emoji_id}.png"
-                )
+                    print("表情貼")
+                    print(product_id)
+                    print(emoji_id)
 
-                print(emoji_url)
-
-                with ApiClient(configuration) as api_client:
-
-                    line_bot_api = MessagingApi(api_client)
-
-                    line_bot_api.push_message(
-                        PushMessageRequest(
-                            to=partner,
-                            messages=[
-                                ImageMessage(
-                                    original_content_url=emoji_url,
-                                    preview_image_url=emoji_url
-                                )
-                            ]
-                        )
+                    emoji_url = (
+                        f"https://stickershop.line-scdn.net/"
+                        f"sticonshop/v1/sticon/{product_id}/iPhone/{emoji_id}.png"
                     )
+
+                    print(emoji_url)
+
+                    try:
+
+                        with ApiClient(configuration) as api_client:
+
+                            line_bot_api = MessagingApi(api_client)
+
+                            line_bot_api.push_message(
+                                PushMessageRequest(
+                                    to=partner,
+                                    messages=[
+                                        ImageMessage(
+                                            original_content_url=emoji_url,
+                                            preview_image_url=emoji_url
+                                        )
+                                    ]
+                                )
+                            )
+
+                    except Exception as e:
+
+                        print("emoji錯誤")
+                        print(e)
 
             return
 
