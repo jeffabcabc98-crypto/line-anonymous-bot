@@ -75,7 +75,8 @@ def handle_text(event):
     # 開始配對
     # =========================
     if text == "開始":
-
+print("開始配對")
+print(result.data)
         # 找等待中的人
         result = supabase.table("waiting_users") \
             .select("*") \
