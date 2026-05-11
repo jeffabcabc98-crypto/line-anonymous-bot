@@ -1,4 +1,3 @@
-```python
 from flask import Flask, request
 import os
 
@@ -315,4 +314,3 @@ def push_text(user_id, text):
 if __name__ == "__main__":
 
     app.run(host="0.0.0.0", port=5000)
-```
