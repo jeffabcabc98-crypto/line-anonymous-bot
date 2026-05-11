@@ -1,18 +1,31 @@
+```python
 from flask import Flask, request
+import os
+import tempfile
+
 from linebot.v3 import WebhookHandler
 from linebot.v3.messaging import (
     Configuration,
     ApiClient,
     MessagingApi,
+    MessagingApiBlob,
     ReplyMessageRequest,
     PushMessageRequest,
     TextMessage
 )
-from linebot.v3.webhooks import MessageEvent, TextMessageContent
-from linebot.exceptions import InvalidSignatureError
-from supabase import create_client
 
-import os
+from linebot.v3.webhooks import (
+    MessageEvent,
+    TextMessageContent,
+    StickerMessageContent,
+    ImageMessageContent,
+    AudioMessageContent,
+    VideoMessageContent
+)
+
+from linebot.exceptions import InvalidSignatureError
+
+from supabase import create_client
 
 app = Flask(__name__)
 
@@ -36,23 +49,29 @@ pairs = {}
 
 @app.route("/callback", methods=['POST'])
 def callback():
+
     signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
 
     try:
         handler.handle(body, signature)
+
     except InvalidSignatureError:
         return 'Invalid signature', 400
 
     return 'OK'
 
 
+# =========================
+# 文字訊息
+# =========================
 @handler.add(MessageEvent, message=TextMessageContent)
-def handle_message(event):
+def handle_text(event):
 
     user_id = event.source.user_id
     text = event.message.text.strip()
 
+    # 開始配對
     if text == "開始":
 
         if waiting_users:
@@ -62,16 +81,18 @@ def handle_message(event):
             pairs[user_id] = partner
             pairs[partner] = user_id
 
-            reply(event.reply_token, "配對成功！")
-            push(partner, "配對成功！")
+            reply(event.reply_token, "✅ 配對成功！")
+            push_text(partner, "✅ 配對成功！")
 
         else:
 
             waiting_users.append(user_id)
-            reply(event.reply_token, "等待配對中...")
+
+            reply(event.reply_token, "⏳ 等待配對中...")
 
         return
 
+    # 離開聊天
     if text == "離開":
 
         if user_id in pairs:
@@ -81,46 +102,145 @@ def handle_message(event):
             del pairs[user_id]
             del pairs[partner]
 
-            push(partner, "對方已離開聊天")
+            push_text(partner, "❌ 對方已離開聊天")
             reply(event.reply_token, "你已離開聊天")
 
         else:
+
             reply(event.reply_token, "目前沒有聊天對象")
 
         return
 
+    # 聊天轉發
     if user_id in pairs:
 
         partner = pairs[user_id]
-        push(partner, text)
+
+        push_text(partner, text)
 
     else:
+
         reply(event.reply_token, "輸入「開始」開始匿名聊天")
 
 
-def reply(reply_token, text):
+# =========================
+# LINE貼圖
+# =========================
+@handler.add(MessageEvent, message=StickerMessageContent)
+def handle_sticker(event):
+
+    user_id = event.source.user_id
+
+    if user_id not in pairs:
+        return
+
+    partner = pairs[user_id]
+
     with ApiClient(configuration) as api_client:
+
+        line_bot_api = MessagingApi(api_client)
+
+        line_bot_api.push_message(
+            PushMessageRequest(
+                to=partner,
+                messages=[
+                    {
+                        "type": "sticker",
+                        "packageId": event.message.package_id,
+                        "stickerId": event.message.sticker_id
+                    }
+                ]
+            )
+        )
+
+
+# =========================
+# 圖片
+# =========================
+@handler.add(MessageEvent, message=ImageMessageContent)
+def handle_image(event):
+
+    user_id = event.source.user_id
+
+    if user_id not in pairs:
+        return
+
+    partner = pairs[user_id]
+
+    push_text(partner, "📷 對方傳送了一張圖片")
+
+
+# =========================
+# 語音
+# =========================
+@handler.add(MessageEvent, message=AudioMessageContent)
+def handle_audio(event):
+
+    user_id = event.source.user_id
+
+    if user_id not in pairs:
+        return
+
+    partner = pairs[user_id]
+
+    push_text(partner, "🎤 對方傳送了一段語音")
+
+
+# =========================
+# 影片
+# =========================
+@handler.add(MessageEvent, message=VideoMessageContent)
+def handle_video(event):
+
+    user_id = event.source.user_id
+
+    if user_id not in pairs:
+        return
+
+    partner = pairs[user_id]
+
+    push_text(partner, "🎬 對方傳送了一段影片")
+
+
+# =========================
+# Reply
+# =========================
+def reply(reply_token, text):
+
+    with ApiClient(configuration) as api_client:
+
         line_bot_api = MessagingApi(api_client)
 
         line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=reply_token,
-                messages=[TextMessage(text=text)]
+                messages=[
+                    TextMessage(text=text)
+                ]
             )
         )
 
 
-def push(user_id, text):
+# =========================
+# Push Text
+# =========================
+def push_text(user_id, text):
+
     with ApiClient(configuration) as api_client:
+
         line_bot_api = MessagingApi(api_client)
 
         line_bot_api.push_message(
             PushMessageRequest(
                 to=user_id,
-                messages=[TextMessage(text=text)]
+                messages=[
+                    TextMessage(text=text)
+                ]
             )
         )
 
 
 if __name__ == "__main__":
+
     app.run(host="0.0.0.0", port=5000)
+```
