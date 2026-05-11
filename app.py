@@ -43,7 +43,6 @@ handler = WebhookHandler(CHANNEL_SECRET)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Memory
-waiting_users = []
 pairs = {}
 
 @app.route("/callback", methods=['POST'])
@@ -73,21 +72,41 @@ def handle_text(event):
     # 開始配對
     if text == "開始":
 
-        if waiting_users:
+     # 找等待中的人
+result = supabase.table("waiting_users") \
+    .select("*") \
+    .neq("user_id", user_id) \
+    .limit(1) \
+    .execute()
 
-            partner = waiting_users.pop(0)
+# 有人等待
+if result.data:
 
-            pairs[user_id] = partner
-            pairs[partner] = user_id
+    partner = result.data[0]["user_id"]
 
-            reply(event.reply_token, "✅ 配對成功！")
-            push_text(partner, "✅ 配對成功！")
+    # 從等待池移除
+    supabase.table("waiting_users") \
+        .delete() \
+        .eq("user_id", partner) \
+        .execute()
 
-        else:
+    # 建立配對
+    pairs[user_id] = partner
+    pairs[partner] = user_id
 
-            waiting_users.append(user_id)
+    reply(event.reply_token, "✅ 配對成功！")
+    push_text(partner, "✅ 配對成功！")
 
-            reply(event.reply_token, "⏳ 等待配對中...")
+# 沒人等待
+else:
+
+    supabase.table("waiting_users") \
+        .upsert({
+            "user_id": user_id
+        }) \
+        .execute()
+
+    reply(event.reply_token, "⏳ 等待配對中...")
 
         return
 
