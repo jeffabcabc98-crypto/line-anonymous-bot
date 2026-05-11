@@ -81,6 +81,55 @@ def handle_text(event):
         text = event.message.text.strip()
 
         # =========================
+        # LINE Emoji 表情貼
+        # =========================
+        if hasattr(event.message, "emojis") and event.message.emojis:
+
+            result = supabase.table("chat_pairs") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .limit(1) \
+                .execute()
+
+            if result.data:
+
+                partner = result.data[0]["partner_id"]
+
+                emoji = event.message.emojis[0]
+
+                product_id = emoji.product_id
+                emoji_id = emoji.emoji_id
+
+                print("表情貼")
+                print(product_id)
+                print(emoji_id)
+
+                emoji_url = (
+                    f"https://stickershop.line-scdn.net/"
+                    f"sticonshop/v1/sticon/{product_id}/iPhone/{emoji_id}.png"
+                )
+
+                print(emoji_url)
+
+                with ApiClient(configuration) as api_client:
+
+                    line_bot_api = MessagingApi(api_client)
+
+                    line_bot_api.push_message(
+                        PushMessageRequest(
+                            to=partner,
+                            messages=[
+                                ImageMessage(
+                                    original_content_url=emoji_url,
+                                    preview_image_url=emoji_url
+                                )
+                            ]
+                        )
+                    )
+
+            return
+
+        # =========================
         # 開始配對
         # =========================
         if text == "開始":
