@@ -1,4 +1,3 @@
-```python id="0zh5wy"
 from flask import Flask, request
 import os
 import requests
@@ -63,6 +62,10 @@ def callback():
     except InvalidSignatureError:
         return 'Invalid signature', 400
 
+    except Exception as e:
+        print("Webhook錯誤")
+        print(e)
+
     return 'OK'
 
 
@@ -72,146 +75,153 @@ def callback():
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_text(event):
 
-    user_id = event.source.user_id
-    text = event.message.text.strip()
+    try:
 
-    # =========================
-    # 開始配對
-    # =========================
-    if text == "開始":
+        user_id = event.source.user_id
+        text = event.message.text.strip()
 
-        print("開始配對")
+        # =========================
+        # 開始配對
+        # =========================
+        if text == "開始":
 
-        # 檢查是否已在等待池
-        check_waiting = supabase.table("waiting_users") \
-            .select("*") \
-            .eq("user_id", user_id) \
-            .execute()
+            print("開始配對")
 
-        if check_waiting.data:
+            # 檢查是否已在等待池
+            check_waiting = supabase.table("waiting_users") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .execute()
 
-            reply(event.reply_token, "⏳ 你已經在等待配對中了")
+            if check_waiting.data:
+
+                reply(event.reply_token, "⏳ 你已經在等待配對中了")
+                return
+
+            # 檢查是否已在聊天中
+            check_chat = supabase.table("chat_pairs") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .execute()
+
+            if check_chat.data:
+
+                reply(event.reply_token, "💬 你目前已經在聊天中了")
+                return
+
+            # 找等待中的人
+            result = supabase.table("waiting_users") \
+                .select("*") \
+                .neq("user_id", user_id) \
+                .limit(1) \
+                .execute()
+
+            print(result.data)
+
+            # 有人等待
+            if result.data:
+
+                partner = result.data[0]["user_id"]
+
+                # 從等待池移除對方
+                supabase.table("waiting_users") \
+                    .delete() \
+                    .eq("user_id", partner) \
+                    .execute()
+
+                # 建立聊天室
+                supabase.table("chat_pairs").insert([
+                    {
+                        "user_id": user_id,
+                        "partner_id": partner
+                    },
+                    {
+                        "user_id": partner,
+                        "partner_id": user_id
+                    }
+                ]).execute()
+
+                reply(event.reply_token, "✅ 配對成功！")
+                push_text(partner, "✅ 配對成功！")
+
+            # 沒人等待
+            else:
+
+                supabase.table("waiting_users") \
+                    .upsert({
+                        "user_id": user_id
+                    }) \
+                    .execute()
+
+                reply(event.reply_token, "⏳ 等待配對中...")
+
             return
 
-        # 檢查是否已在聊天中
-        check_chat = supabase.table("chat_pairs") \
-            .select("*") \
-            .eq("user_id", user_id) \
-            .execute()
+        # =========================
+        # 離開聊天
+        # =========================
+        if text == "離開":
 
-        if check_chat.data:
+            result = supabase.table("chat_pairs") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .limit(1) \
+                .execute()
 
-            reply(event.reply_token, "💬 你目前已經在聊天中了")
-            return
+            if not result.data:
 
-        # 找等待中的人
-        result = supabase.table("waiting_users") \
-            .select("*") \
-            .neq("user_id", user_id) \
-            .limit(1) \
-            .execute()
+                reply(event.reply_token, "目前沒有聊天對象")
+                return
 
-        print(result.data)
+            partner = result.data[0]["partner_id"]
 
-        # 有人等待
-        if result.data:
+            # 刪除雙方聊天室
+            supabase.table("chat_pairs") \
+                .delete() \
+                .eq("user_id", user_id) \
+                .execute()
 
-            partner = result.data[0]["user_id"]
-
-            # 從等待池移除對方
-            supabase.table("waiting_users") \
+            supabase.table("chat_pairs") \
                 .delete() \
                 .eq("user_id", partner) \
                 .execute()
 
-            # 建立聊天室
-            supabase.table("chat_pairs").insert([
-                {
-                    "user_id": user_id,
-                    "partner_id": partner
-                },
-                {
-                    "user_id": partner,
-                    "partner_id": user_id
-                }
-            ]).execute()
+            try:
+                push_text(partner, "⚠️ 對方已離開聊天")
+            except:
+                pass
 
-            reply(event.reply_token, "✅ 配對成功！")
-            push_text(partner, "✅ 配對成功！")
+            reply(event.reply_token, "✅ 你已離開聊天")
 
-        # 沒人等待
-        else:
+            return
 
-            supabase.table("waiting_users") \
-                .upsert({
-                    "user_id": user_id
-                }) \
-                .execute()
-
-            reply(event.reply_token, "⏳ 等待配對中...")
-
-        return
-
-    # =========================
-    # 離開聊天
-    # =========================
-    if text == "離開":
-
+        # =========================
+        # 一般聊天
+        # =========================
         result = supabase.table("chat_pairs") \
             .select("*") \
             .eq("user_id", user_id) \
             .limit(1) \
             .execute()
 
-        if not result.data:
+        if result.data:
 
-            reply(event.reply_token, "目前沒有聊天對象")
-            return
+            partner = result.data[0]["partner_id"]
 
-        partner = result.data[0]["partner_id"]
+            push_text(partner, text)
 
-        # 刪除雙方聊天室
-        supabase.table("chat_pairs") \
-            .delete() \
-            .eq("user_id", user_id) \
-            .execute()
+        else:
 
-        supabase.table("chat_pairs") \
-            .delete() \
-            .eq("user_id", partner) \
-            .execute()
+            reply(event.reply_token, "輸入「開始」開始匿名聊天")
 
-        try:
-            push_text(partner, "⚠️ 對方已離開聊天")
-        except:
-            pass
+    except Exception as e:
 
-        reply(event.reply_token, "✅ 你已離開聊天")
-
-        return
-
-    # =========================
-    # 一般聊天
-    # =========================
-    result = supabase.table("chat_pairs") \
-        .select("*") \
-        .eq("user_id", user_id) \
-        .limit(1) \
-        .execute()
-
-    if result.data:
-
-        partner = result.data[0]["partner_id"]
-
-        push_text(partner, text)
-
-    else:
-
-        reply(event.reply_token, "輸入「開始」開始匿名聊天")
+        print("文字錯誤")
+        print(e)
 
 
 # =========================
-# LINE貼圖 → 轉圖片
+# LINE貼圖 → 圖片
 # =========================
 @handler.add(MessageEvent, message=StickerMessageContent)
 def handle_sticker(event):
@@ -388,20 +398,27 @@ def handle_image(event):
 @handler.add(MessageEvent, message=AudioMessageContent)
 def handle_audio(event):
 
-    user_id = event.source.user_id
+    try:
 
-    result = supabase.table("chat_pairs") \
-        .select("*") \
-        .eq("user_id", user_id) \
-        .limit(1) \
-        .execute()
+        user_id = event.source.user_id
 
-    if not result.data:
-        return
+        result = supabase.table("chat_pairs") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .limit(1) \
+            .execute()
 
-    partner = result.data[0]["partner_id"]
+        if not result.data:
+            return
 
-    push_text(partner, "🎤 對方傳送了一段語音")
+        partner = result.data[0]["partner_id"]
+
+        push_text(partner, "🎤 對方傳送了一段語音")
+
+    except Exception as e:
+
+        print("語音錯誤")
+        print(e)
 
 
 # =========================
@@ -410,20 +427,27 @@ def handle_audio(event):
 @handler.add(MessageEvent, message=VideoMessageContent)
 def handle_video(event):
 
-    user_id = event.source.user_id
+    try:
 
-    result = supabase.table("chat_pairs") \
-        .select("*") \
-        .eq("user_id", user_id) \
-        .limit(1) \
-        .execute()
+        user_id = event.source.user_id
 
-    if not result.data:
-        return
+        result = supabase.table("chat_pairs") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .limit(1) \
+            .execute()
 
-    partner = result.data[0]["partner_id"]
+        if not result.data:
+            return
 
-    push_text(partner, "🎬 對方傳送了一段影片")
+        partner = result.data[0]["partner_id"]
+
+        push_text(partner, "🎬 對方傳送了一段影片")
+
+    except Exception as e:
+
+        print("影片錯誤")
+        print(e)
 
 
 # =========================
@@ -431,18 +455,25 @@ def handle_video(event):
 # =========================
 def reply(reply_token, text):
 
-    with ApiClient(configuration) as api_client:
+    try:
 
-        line_bot_api = MessagingApi(api_client)
+        with ApiClient(configuration) as api_client:
 
-        line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=reply_token,
-                messages=[
-                    TextMessage(text=text)
-                ]
+            line_bot_api = MessagingApi(api_client)
+
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[
+                        TextMessage(text=text)
+                    ]
+                )
             )
-        )
+
+    except Exception as e:
+
+        print("reply錯誤")
+        print(e)
 
 
 # =========================
@@ -450,21 +481,34 @@ def reply(reply_token, text):
 # =========================
 def push_text(user_id, text):
 
-    with ApiClient(configuration) as api_client:
+    try:
 
-        line_bot_api = MessagingApi(api_client)
+        with ApiClient(configuration) as api_client:
 
-        line_bot_api.push_message(
-            PushMessageRequest(
-                to=user_id,
-                messages=[
-                    TextMessage(text=text)
-                ]
+            line_bot_api = MessagingApi(api_client)
+
+            line_bot_api.push_message(
+                PushMessageRequest(
+                    to=user_id,
+                    messages=[
+                        TextMessage(text=text)
+                    ]
+                )
             )
-        )
+
+    except Exception as e:
+
+        print("push錯誤")
+        print(e)
 
 
+# =========================
+# Run
+# =========================
 if __name__ == "__main__":
 
-    app.run(host="0.0.0.0", port=5000)
-```
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        threaded=True
+    )
