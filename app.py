@@ -74,16 +74,22 @@ def handle_text(event):
     # =========================
     # 開始配對
     # =========================
-  if text == "開始":
+    
+    # =========================
+    # 開始配對
+    # =========================
+    if text == "開始":
 
-    print("開始配對")
-    print(result.data)
+        print("開始配對")
+
         # 找等待中的人
         result = supabase.table("waiting_users") \
             .select("*") \
             .neq("user_id", user_id) \
             .limit(1) \
             .execute()
+
+        print(result.data)
 
         # 有人等待
         if result.data:
@@ -123,6 +129,7 @@ def handle_text(event):
             reply(event.reply_token, "⏳ 等待配對中...")
 
         return
+
 
     # =========================
     # 離開聊天
