@@ -123,10 +123,26 @@ else:
 
 if user_id in pairs:
 
-    partner = pairs[user_id]
+ result = supabase.table("chat_pairs") \
+    .select("*") \
+    .eq("user_id", user_id) \
+    .execute()
 
-    pairs.pop(user_id, None)
-    pairs.pop(partner, None)
+if not result.data:
+    reply(event.reply_token, "目前沒有聊天對象")
+    return
+
+partner = result.data[0]["partner_id"]
+
+  supabase.table("chat_pairs") \
+    .delete() \
+    .eq("user_id", user_id) \
+    .execute()
+
+supabase.table("chat_pairs") \
+    .delete() \
+    .eq("user_id", partner) \
+    .execute()
 
     push(partner, "對方已離開聊天")
     reply(event.reply_token, "你已離開聊天")
