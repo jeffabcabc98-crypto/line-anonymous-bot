@@ -1,23 +1,36 @@
 from flask import Flask, request
 from linebot.v3 import WebhookHandler
-from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, PushMessageRequest, TextMessage
+from linebot.v3.messaging import (
+    Configuration,
+    ApiClient,
+    MessagingApi,
+    ReplyMessageRequest,
+    PushMessageRequest,
+    TextMessage
+)
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 from linebot.exceptions import InvalidSignatureError
-
-app = Flask(__name__)
+from supabase import create_client
 
 import os
+
+app = Flask(__name__)
 
 # Railway Variables
 CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
 CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
 
-print("TOKEN:", CHANNEL_ACCESS_TOKEN)
-print("SECRET:", CHANNEL_SECRET)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
+# LINE
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
+# Supabase
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Memory
 waiting_users = []
 pairs = {}
 
