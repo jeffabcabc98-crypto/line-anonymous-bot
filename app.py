@@ -11,7 +11,6 @@ from linebot.v3.messaging import (
     ReplyMessageRequest,
     PushMessageRequest,
     TextMessage,
-    StickerMessage,
     ImageMessage
 )
 
@@ -211,7 +210,7 @@ def handle_text(event):
 
 
 # =========================
-# LINE貼圖
+# LINE貼圖 → 轉圖片
 # =========================
 @handler.add(MessageEvent, message=StickerMessageContent)
 def handle_sticker(event):
@@ -238,6 +237,15 @@ def handle_sticker(event):
         print(package_id)
         print(sticker_id)
 
+        # 官方貼圖圖片網址
+        sticker_url = (
+            f"https://stickershop.line-scdn.net/"
+            f"stickershop/v1/sticker/{sticker_id}/ANDROID/sticker.png"
+        )
+
+        print("找到貼圖網址:")
+        print(sticker_url)
+
         with ApiClient(configuration) as api_client:
 
             line_bot_api = MessagingApi(api_client)
@@ -246,15 +254,15 @@ def handle_sticker(event):
                 PushMessageRequest(
                     to=partner,
                     messages=[
-                        StickerMessage(
-                            package_id=package_id,
-                            sticker_id=sticker_id
+                        ImageMessage(
+                            original_content_url=sticker_url,
+                            preview_image_url=sticker_url
                         )
                     ]
                 )
             )
 
-        print("貼圖成功轉發")
+        print("貼圖成功轉圖片")
 
     except Exception as e:
 
@@ -294,8 +302,6 @@ def handle_image(event):
 
         url = f"https://api-data.line.me/v2/bot/message/{message_id}/content"
 
-        print(url)
-
         response = requests.get(url, headers=headers)
 
         print("status:")
@@ -319,8 +325,6 @@ def handle_image(event):
 
         if isinstance(image_url, dict):
             image_url = image_url["publicUrl"]
-
-        print(image_url)
 
         with ApiClient(configuration) as api_client:
 
