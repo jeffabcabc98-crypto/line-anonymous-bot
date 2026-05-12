@@ -185,6 +185,15 @@ def handle_text(event):
                 partner = result.data[0]["partner_id"]
                 nickname = result.data[0]["nickname"]
 
+                # 聊天紀錄
+                supabase.table("chat_logs").insert({
+                    "sender_id": user_id,
+                    "receiver_id": partner,
+                    "sender_name": nickname,
+                    "message_type": "emoji",
+                    "message": text
+                }).execute()
+
                 push_text(
                     partner,
                     f"{nickname}：{text}"
@@ -299,8 +308,7 @@ def handle_text(event):
                     .select("*") \
                     .eq("user_id", user_id) \
                     .execute()
-
-                if not result.data:
+                                if not result.data:
 
                     reply(event.reply_token, "沒有封鎖名單")
                     return
@@ -549,8 +557,7 @@ def handle_text(event):
             reply(event.reply_token, "✅ 你已離開聊天")
 
             return
-
-        # =========================
+                    # =========================
         # 一般聊天
         # =========================
         result = supabase.table("chat_pairs") \
@@ -563,6 +570,15 @@ def handle_text(event):
 
             partner = result.data[0]["partner_id"]
             nickname = result.data[0]["nickname"]
+
+            # 聊天紀錄
+            supabase.table("chat_logs").insert({
+                "sender_id": user_id,
+                "receiver_id": partner,
+                "sender_name": nickname,
+                "message_type": "text",
+                "message": text
+            }).execute()
 
             push_text(
                 partner,
@@ -605,6 +621,15 @@ def handle_sticker(event):
 
         package_id = str(event.message.package_id)
         sticker_id = str(event.message.sticker_id)
+
+        # 聊天紀錄
+        supabase.table("chat_logs").insert({
+            "sender_id": user_id,
+            "receiver_id": partner,
+            "sender_name": "貼圖",
+            "message_type": "sticker",
+            "message": sticker_id
+        }).execute()
 
         with ApiClient(configuration) as api_client:
 
@@ -680,6 +705,15 @@ def handle_image(event):
 
         if isinstance(image_url, dict):
             image_url = image_url["publicUrl"]
+
+        # 聊天紀錄
+        supabase.table("chat_logs").insert({
+            "sender_id": user_id,
+            "receiver_id": partner,
+            "sender_name": nickname,
+            "message_type": "image",
+            "message": image_url
+        }).execute()
 
         push_text(
             partner,
