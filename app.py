@@ -231,8 +231,7 @@ def handle_text(event):
                         print(e)
 
             return
-
-        # =========================
+                    # =========================
         # 封鎖名單
         # =========================
         if text == "封鎖名單":
@@ -360,11 +359,57 @@ def handle_text(event):
             partner = result.data[0]["partner_id"]
             nickname = result.data[0]["partner_nickname"]
 
+            # 檢查是否已封鎖過
+            already_blocked = supabase.table("blacklist") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .eq("blocked_user_id", partner) \
+                .execute()
+
+            if already_blocked.data:
+
+                reply(
+                    event.reply_token,
+                    "⚠️ 你已經封鎖過這位使用者"
+                )
+
+                return
+
+            # 新增封鎖
             supabase.table("blacklist").insert({
                 "user_id": user_id,
                 "blocked_user_id": partner,
                 "nickname": nickname
             }).execute()
+
+            # =========================
+            # 自動封號檢查
+            # =========================
+            block_count = supabase.table("blacklist") \
+                .select("*", count="exact") \
+                .eq("blocked_user_id", partner) \
+                .execute()
+
+            count = block_count.count
+
+            print("被封鎖次數：", count)
+
+            if count >= 10:
+
+                check_ban = supabase.table("banned_users") \
+                    .select("*") \
+                    .eq("user_id", partner) \
+                    .limit(1) \
+                    .execute()
+
+                if not check_ban.data:
+
+                    supabase.table("banned_users").insert({
+                        "user_id": partner,
+                        "reason": "被超過10位使用者封鎖"
+                    }).execute()
+
+                    print("已自動封號")
 
             supabase.table("chat_pairs") \
                 .delete() \
@@ -387,8 +432,7 @@ def handle_text(event):
                 pass
 
             return
-
-        # =========================
+                    # =========================
         # 開始配對
         # =========================
         if text == "開始":
@@ -558,7 +602,8 @@ def handle_text(event):
             reply(event.reply_token, "✅ 你已離開聊天")
 
             return
-                    # =========================
+
+        # =========================
         # 一般聊天
         # =========================
         result = supabase.table("chat_pairs") \
@@ -597,9 +642,7 @@ def handle_text(event):
 
         print("文字錯誤")
         print(e)
-
-
-# =========================
+        # =========================
 # 貼圖
 # =========================
 @handler.add(MessageEvent, message=StickerMessageContent)
