@@ -16,9 +16,7 @@ from linebot.v3.messaging import (
     PushMessageRequest,
     TextMessage,
     ImageMessage,
-    StickerMessage,
-    AudioMessage,
-    VideoMessage
+    StickerMessage
 )
 
 from linebot.v3.webhooks import (
@@ -72,15 +70,16 @@ def generate_nickname():
 # 管理員設定
 # =========================
 ADMIN_PASSWORD = "0012477"
+
 admin_login = {}
 
 # =========================
-# 冷卻時間
+# 貼圖冷卻
 # =========================
 sticker_cooldown = {}
 
 # =========================
-# ENV
+# Railway ENV
 # =========================
 CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
 CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
@@ -113,89 +112,18 @@ def callback():
     body = request.get_data(as_text=True)
 
     try:
+
         handler.handle(body, signature)
 
     except InvalidSignatureError:
         return 'Invalid signature', 400
 
     except Exception as e:
+
+        print("Webhook錯誤")
         print(e)
 
     return 'OK'
-
-
-# =========================
-# Reply
-# =========================
-def reply(reply_token, text):
-
-    with ApiClient(configuration) as api_client:
-
-        line_bot_api = MessagingApi(api_client)
-
-        line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=reply_token,
-                messages=[
-                    TextMessage(text=text)
-                ]
-            )
-        )
-
-
-# =========================
-# Push Text
-# =========================
-def push_text(user_id, text):
-
-    with ApiClient(configuration) as api_client:
-
-        line_bot_api = MessagingApi(api_client)
-
-        line_bot_api.push_message(
-            PushMessageRequest(
-                to=user_id,
-                messages=[
-                    TextMessage(text=text)
-                ]
-            )
-        )
-
-
-# =========================
-# 上傳 LINE 內容
-# =========================
-def get_content(message_id):
-
-    headers = {
-        "Authorization": "Bearer " + CHANNEL_ACCESS_TOKEN
-    }
-
-    url = (
-        f"https://api-data.line.me/v2/bot/message/"
-        f"{message_id}/content"
-    )
-
-    response = requests.get(url, headers=headers)
-
-    return response.content
-
-
-# =========================
-# 檢查聊天對象
-# =========================
-def get_partner(user_id):
-
-    result = supabase.table("chat_pairs") \
-        .select("*") \
-        .eq("user_id", user_id) \
-        .limit(1) \
-        .execute()
-
-    if not result.data:
-        return None
-
-    return result.data[0]
 
 
 # =========================
@@ -224,7 +152,7 @@ def handle_text(event):
             return
 
         # =========================
-        # 管理員密碼
+        # 管理員密碼驗證
         # =========================
         if text.startswith("密碼:"):
 
@@ -241,122 +169,176 @@ def handle_text(event):
                     "2️⃣ 查看聊天中人數\n"
                     "3️⃣ 查看封鎖排行榜\n"
                     "4️⃣ 查看最近聊天紀錄\n"
-                    "5️⃣ 封號 USER_ID\n"
-                    "6️⃣ 解封 USER_ID\n"
+                    "5️⃣ 封鎖使用者\n"
+                    "6️⃣ 解封使用者\n"
                     "7️⃣ 查看停權名單"
                 )
 
             else:
+
                 reply(event.reply_token, "❌ 密碼錯誤")
 
             return
+                    # =========================
+        # 查看等待人數
+        # =========================
+        if text == "1" or text == "1️⃣ 查看等待人數":
+
+            if not admin_login.get(user_id):
+                return
+
+            waiting = supabase.table("waiting_users") \
+                .select("*", count="exact") \
+                .execute()
+
+            count = waiting.count
+
+            reply(
+                event.reply_token,
+                f"⏳ 目前等待配對：{count} 人"
+            )
+
+            return
 
         # =========================
-        # 管理員功能
+        # 查看聊天中人數
         # =========================
-        if text == "1":
+        if text == "2" or text == "2️⃣ 查看聊天中人數":
 
-            if admin_login.get(user_id):
+            if not admin_login.get(user_id):
+                return
 
-                waiting = supabase.table("waiting_users") \
-                    .select("*", count="exact") \
-                    .execute()
+            chatting = supabase.table("chat_pairs") \
+                .select("*", count="exact") \
+                .execute()
 
-                reply(
-                    event.reply_token,
-                    f"⏳ 等待配對：{waiting.count} 人"
-                )
+            count = chatting.count // 2
 
-            return
-
-        if text == "2":
-
-            if admin_login.get(user_id):
-
-                chatting = supabase.table("chat_pairs") \
-                    .select("*", count="exact") \
-                    .execute()
-
-                count = chatting.count // 2
-
-                reply(
-                    event.reply_token,
-                    f"💬 聊天中：{count} 組"
-                )
+            reply(
+                event.reply_token,
+                f"💬 目前聊天中：{count} 組"
+            )
 
             return
 
-        if text == "3":
+        # =========================
+        # 查看封鎖排行榜
+        # =========================
+        if text == "3" or text == "3️⃣ 查看封鎖排行榜":
 
-            if admin_login.get(user_id):
+            if not admin_login.get(user_id):
+                return
 
-                result = supabase.table("blacklist") \
-                    .select("blocked_user_id") \
-                    .execute()
+            result = supabase.table("blacklist") \
+                .select("blocked_user_id") \
+                .execute()
 
-                counter = {}
+            if not result.data:
 
-                for row in result.data:
+                reply(event.reply_token, "目前沒有封鎖資料")
+                return
 
-                    uid = row["blocked_user_id"]
-                    counter[uid] = counter.get(uid, 0) + 1
+            counter = {}
 
-                sorted_users = sorted(
-                    counter.items(),
-                    key=lambda x: x[1],
-                    reverse=True
-                )
+            for row in result.data:
 
-                msg = "🚨 封鎖排行榜\n\n"
+                uid = row["blocked_user_id"]
 
-                for uid, count in sorted_users[:10]:
-                    msg += f"{uid[:12]}... {count} 次\n"
+                counter[uid] = counter.get(uid, 0) + 1
 
-                reply(event.reply_token, msg)
+            sorted_users = sorted(
+                counter.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
 
-            return
+            msg = "🚨 封鎖排行榜\n\n"
 
-        if text == "4":
+            for uid, count in sorted_users[:10]:
 
-            if admin_login.get(user_id):
+                msg += f"{uid[:12]}... 被封鎖 {count} 次\n"
 
-                logs = supabase.table("chat_logs") \
-                    .select("*") \
-                    .order("created_at", desc=True) \
-                    .limit(10) \
-                    .execute()
-
-                msg = "🧾 最近聊天紀錄\n\n"
-
-                for row in logs.data:
-
-                    name = row.get("sender_name", "未知")
-                    message = row.get("message", "")
-
-                    msg += f"{name}：{message}\n\n"
-
-                reply(event.reply_token, msg[:5000])
+            reply(event.reply_token, msg)
 
             return
 
+        # =========================
+        # 查看最近聊天紀錄
+        # =========================
+        if text == "4" or text == "4️⃣ 查看最近聊天紀錄":
+
+            if not admin_login.get(user_id):
+                return
+
+            logs = supabase.table("chat_logs") \
+                .select("*") \
+                .order("created_at", desc=True) \
+                .limit(10) \
+                .execute()
+
+            if not logs.data:
+
+                reply(event.reply_token, "目前沒有聊天紀錄")
+                return
+
+            msg = "🧾 最近聊天紀錄\n\n"
+
+            for row in logs.data:
+
+                name = row.get("sender_name", "未知")
+                message = row.get("message", "")
+
+                msg += f"{name}：{message}\n\n"
+
+            reply(event.reply_token, msg[:5000])
+
+            return
+
+        # =========================
+        # 管理員封號
+        # =========================
         if text.startswith("封號 "):
 
-            if admin_login.get(user_id):
+            if not admin_login.get(user_id):
+                return
+
+            try:
 
                 target = text.replace("封號 ", "").strip()
+
+                check = supabase.table("banned_users") \
+                    .select("*") \
+                    .eq("user_id", target) \
+                    .execute()
+
+                if check.data:
+
+                    reply(event.reply_token, "此人已被封號")
+                    return
 
                 supabase.table("banned_users").insert({
                     "user_id": target,
                     "reason": "管理員封號"
                 }).execute()
 
-                reply(event.reply_token, "✅ 已封號")
+                reply(event.reply_token, "✅ 已成功封號")
+
+            except Exception as e:
+
+                print(e)
+                reply(event.reply_token, "封號失敗")
 
             return
 
+        # =========================
+        # 管理員解封
+        # =========================
         if text.startswith("解封 "):
 
-            if admin_login.get(user_id):
+            if not admin_login.get(user_id):
+                return
+
+            try:
 
                 target = text.replace("解封 ", "").strip()
 
@@ -365,29 +347,46 @@ def handle_text(event):
                     .eq("user_id", target) \
                     .execute()
 
-                reply(event.reply_token, "✅ 已解封")
+                reply(event.reply_token, "✅ 已解除封號")
+
+            except Exception as e:
+
+                print(e)
+                reply(event.reply_token, "解封失敗")
 
             return
+                    # =========================
+        # 查看停權名單
+        # =========================
+        if text == "7" or text == "7️⃣ 查看停權名單":
 
-        if text == "7":
+            if not admin_login.get(user_id):
+                return
 
-            if admin_login.get(user_id):
+            result = supabase.table("banned_users") \
+                .select("*") \
+                .execute()
 
-                result = supabase.table("banned_users") \
-                    .select("*") \
-                    .execute()
+            if not result.data:
 
-                msg = "🚫 停權名單\n\n"
+                reply(event.reply_token, "目前沒有停權名單")
+                return
 
-                for row in result.data:
-                    msg += f"{row['user_id'][:12]}...\n"
+            msg = "🚫 停權名單\n\n"
 
-                reply(event.reply_token, msg)
+            for row in result.data:
+
+                uid = row["user_id"]
+                reason = row["reason"]
+
+                msg += f"{uid[:12]}...\n原因：{reason}\n\n"
+
+            reply(event.reply_token, msg[:5000])
 
             return
 
         # =========================
-        # 停權檢查
+        # 管理員封號檢查
         # =========================
         banned = supabase.table("banned_users") \
             .select("*") \
@@ -407,6 +406,87 @@ def handle_text(event):
             return
 
         # =========================
+        # Emoji 表情貼
+        # =========================
+        if hasattr(event.message, "emojis") and event.message.emojis:
+
+            now = time.time()
+
+            if user_id in sticker_cooldown:
+
+                diff = now - sticker_cooldown[user_id]
+
+                if diff < 5:
+
+                    remain = round(5 - diff, 1)
+
+                    reply(
+                        event.reply_token,
+                        f"⏳ 你的手速太快了，請 {remain} 秒後再試"
+                    )
+
+                    return
+
+            sticker_cooldown[user_id] = now
+
+            result = supabase.table("chat_pairs") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .limit(1) \
+                .execute()
+
+            if result.data:
+
+                partner = result.data[0]["partner_id"]
+                nickname = result.data[0]["nickname"]
+
+                # 聊天紀錄
+                supabase.table("chat_logs").insert({
+                    "sender_id": user_id,
+                    "receiver_id": partner,
+                    "sender_name": nickname,
+                    "message_type": "emoji",
+                    "message": text
+                }).execute()
+
+                push_text(
+                    partner,
+                    f"{nickname}：{text}"
+                )
+
+                for emoji in event.message.emojis:
+
+                    product_id = emoji.product_id
+                    emoji_id = emoji.emoji_id
+
+                    emoji_url = (
+                        f"https://stickershop.line-scdn.net/"
+                        f"sticonshop/v1/sticon/{product_id}/iPhone/{emoji_id}.png"
+                    )
+
+                    try:
+
+                        with ApiClient(configuration) as api_client:
+
+                            line_bot_api = MessagingApi(api_client)
+
+                            line_bot_api.push_message(
+                                PushMessageRequest(
+                                    to=partner,
+                                    messages=[
+                                        ImageMessage(
+                                            original_content_url=emoji_url,
+                                            preview_image_url=emoji_url
+                                        )
+                                    ]
+                                )
+                            )
+
+                    except Exception as e:
+                        print(e)
+
+            return
+                    # =========================
         # 封鎖名單
         # =========================
         if text == "封鎖名單":
@@ -418,19 +498,23 @@ def handle_text(event):
 
             if not result.data:
 
-                reply(event.reply_token, "目前沒有封鎖任何人")
+                reply(event.reply_token, "✅ 目前沒有封鎖任何人")
                 return
 
-            msg = "🚫 封鎖名單\n\n"
+            msg = "🚫 封鎖名單：\n\n"
 
             for i, row in enumerate(result.data, start=1):
-                msg += f"{i}. {row['nickname']}\n"
+
+                nickname = row["nickname"]
+
+                msg += f"{i}. {nickname}\n"
 
             reply(event.reply_token, msg)
+
             return
 
         # =========================
-        # 解除封鎖
+        # 解除封鎖選單
         # =========================
         if text == "解除封鎖":
 
@@ -441,41 +525,166 @@ def handle_text(event):
 
             if not result.data:
 
-                reply(event.reply_token, "目前沒有封鎖任何人")
+                reply(event.reply_token, "✅ 目前沒有封鎖任何人")
                 return
 
-            msg = "🔓 解除封鎖列表\n\n"
+            msg = "🔓 請選擇要解除封鎖的人：\n\n"
 
             for i, row in enumerate(result.data, start=1):
-                msg += f"{i}. {row['nickname']}\n"
 
-            msg += "\n輸入：解除 編號"
+                nickname = row["nickname"]
+
+                msg += f"{i}. {nickname}\n"
+
+            msg += "\n輸入：\n解除 編號"
 
             reply(event.reply_token, msg)
+
             return
 
+        # =========================
+        # 單獨解除
+        # =========================
         if text.startswith("解除 "):
 
-            parts = text.split()
+            try:
 
-            if len(parts) < 2:
+                parts = text.split()
+
+                if len(parts) < 2:
+
+                    reply(event.reply_token, "格式：解除 編號")
+                    return
+
+                index = int(parts[1]) - 1
+
+                result = supabase.table("blacklist") \
+                    .select("*") \
+                    .eq("user_id", user_id) \
+                    .execute()
+
+                if not result.data:
+
+                    reply(event.reply_token, "沒有封鎖名單")
+                    return
+
+                if index < 0 or index >= len(result.data):
+
+                    reply(event.reply_token, "編號不存在")
+                    return
+
+                target = result.data[index]
+
+                nickname = target["nickname"]
+
+                supabase.table("blacklist") \
+                    .delete() \
+                    .eq("id", target["id"]) \
+                    .execute()
+
+                reply(
+                    event.reply_token,
+                    f"✅ 已解除封鎖 {nickname}"
+                )
+
+            except Exception as e:
+
+                print(e)
+
+                reply(event.reply_token, "解除失敗")
+
+            return
+
+        # =========================
+        # 封鎖對方
+        # =========================
+        if text == "封鎖":
+
+            result = supabase.table("chat_pairs") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .limit(1) \
+                .execute()
+
+            if not result.data:
+
+                reply(event.reply_token, "目前沒有聊天對象")
                 return
 
-            index = int(parts[1]) - 1
+            partner = result.data[0]["partner_id"]
+            nickname = result.data[0]["partner_nickname"]
 
-            result = supabase.table("blacklist") \
+            # 檢查是否已封鎖過
+            already_blocked = supabase.table("blacklist") \
                 .select("*") \
+                .eq("user_id", user_id) \
+                .eq("blocked_user_id", partner) \
+                .execute()
+
+            if already_blocked.data:
+
+                reply(
+                    event.reply_token,
+                    "⚠️ 你已經封鎖過這位使用者"
+                )
+
+                return
+                            # 新增封鎖
+            supabase.table("blacklist").insert({
+                "user_id": user_id,
+                "blocked_user_id": partner,
+                "nickname": nickname
+            }).execute()
+
+            # =========================
+            # 自動封號檢查
+            # =========================
+            block_count = supabase.table("blacklist") \
+                .select("*", count="exact") \
+                .eq("blocked_user_id", partner) \
+                .execute()
+
+            count = block_count.count
+
+            print("被封鎖次數：", count)
+
+            if count >= 10:
+
+                check_ban = supabase.table("banned_users") \
+                    .select("*") \
+                    .eq("user_id", partner) \
+                    .limit(1) \
+                    .execute()
+
+                if not check_ban.data:
+
+                    supabase.table("banned_users").insert({
+                        "user_id": partner,
+                        "reason": "被超過10位使用者封鎖"
+                    }).execute()
+
+                    print("已自動封號")
+
+            supabase.table("chat_pairs") \
+                .delete() \
                 .eq("user_id", user_id) \
                 .execute()
 
-            target = result.data[index]
-
-            supabase.table("blacklist") \
+            supabase.table("chat_pairs") \
                 .delete() \
-                .eq("id", target["id"]) \
+                .eq("user_id", partner) \
                 .execute()
 
-            reply(event.reply_token, "✅ 已解除封鎖")
+            reply(
+                event.reply_token,
+                f"🚫 已封鎖 {nickname}"
+            )
+
+            try:
+                push_text(partner, "⚠️ 對方已離開聊天")
+            except:
+                pass
+
             return
 
         # =========================
@@ -483,11 +692,24 @@ def handle_text(event):
         # =========================
         if text == "開始":
 
-            already = get_partner(user_id)
+            check_waiting = supabase.table("waiting_users") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .execute()
 
-            if already:
+            if check_waiting.data:
 
-                reply(event.reply_token, "你已經在聊天中了")
+                reply(event.reply_token, "⏳ 你已經在等待配對中了")
+                return
+
+            check_chat = supabase.table("chat_pairs") \
+                .select("*") \
+                .eq("user_id", user_id) \
+                .execute()
+
+            if check_chat.data:
+
+                reply(event.reply_token, "💬 你目前已經在聊天中了")
                 return
 
             waiting_users = supabase.table("waiting_users") \
@@ -516,6 +738,11 @@ def handle_text(event):
                 if check1.data or check2.data:
                     continue
 
+                partner = target
+                break
+
+            if partner:
+
                 one_hour_ago = datetime.now(
                     timezone.utc
                 ) - timedelta(hours=1)
@@ -523,202 +750,152 @@ def handle_text(event):
                 recent = supabase.table("recent_pairs") \
                     .select("*") \
                     .or_(
-                        f"and(user1.eq.{user_id},user2.eq.{target}),"
-                        f"and(user1.eq.{target},user2.eq.{user_id})"
+                        f"and(user1.eq.{user_id},user2.eq.{partner}),"
+                        f"and(user1.eq.{partner},user2.eq.{user_id})"
                     ) \
                     .gte(
                         "created_at",
                         one_hour_ago.isoformat()
                     ) \
                     .execute()
-
-                if recent.data:
-                    continue
-
-                partner = target
-                break
-
-            if partner:
-
-                supabase.table("waiting_users") \
-                    .delete() \
-                    .eq("user_id", partner) \
-                    .execute()
-
-                nickname1 = generate_nickname()
-                nickname2 = generate_nickname()
-
-                supabase.table("chat_pairs").insert([
-                    {
-                        "user_id": user_id,
-                        "partner_id": partner,
-                        "nickname": nickname1,
-                        "partner_nickname": nickname2
-                    },
-                    {
-                        "user_id": partner,
-                        "partner_id": user_id,
-                        "nickname": nickname2,
-                        "partner_nickname": nickname1
-                    }
-                ]).execute()
-
-                supabase.table("recent_pairs").insert({
-                    "user1": user_id,
-                    "user2": partner
-                }).execute()
+                            if recent.data:
 
                 reply(
                     event.reply_token,
-                    f"✅ 配對成功\n你的暱稱：{nickname1}"
+                    "⏳ 正在尋找新的聊天對象..."
                 )
 
-                push_text(
-                    partner,
-                    f"✅ 配對成功\n你的暱稱：{nickname2}"
-                )
-
-            else:
-
-                supabase.table("waiting_users") \
-                    .upsert({
-                        "user_id": user_id
-                    }) \
-                    .execute()
-
-                reply(event.reply_token, "⏳ 等待配對中...")
-
-            return
-
-        # =========================
-        # 離開聊天
-        # =========================
-        if text == "離開":
-
-            result = get_partner(user_id)
-
-            if not result:
-
-                reply(event.reply_token, "目前沒有聊天對象")
                 return
 
-            partner = result["partner_id"]
-
-            supabase.table("chat_pairs") \
-                .delete() \
-                .eq("user_id", user_id) \
-                .execute()
-
-            supabase.table("chat_pairs") \
+            supabase.table("waiting_users") \
                 .delete() \
                 .eq("user_id", partner) \
                 .execute()
 
-            reply(event.reply_token, "✅ 已離開聊天")
+            nickname1 = generate_nickname()
+            nickname2 = generate_nickname()
 
-            push_text(partner, "⚠️ 對方已離開聊天")
+            supabase.table("chat_pairs").insert([
+                {
+                    "user_id": user_id,
+                    "partner_id": partner,
+                    "nickname": nickname1,
+                    "partner_nickname": nickname2
+                },
+                {
+                    "user_id": partner,
+                    "partner_id": user_id,
+                    "nickname": nickname2,
+                    "partner_nickname": nickname1
+                }
+            ]).execute()
 
-            return
-
-        # =========================
-        # 封鎖對方
-        # =========================
-        if text == "封鎖":
-
-            result = get_partner(user_id)
-
-            if not result:
-
-                reply(event.reply_token, "目前沒有聊天對象")
-                return
-
-            partner = result["partner_id"]
-            nickname = result["partner_nickname"]
-
-            already = supabase.table("blacklist") \
-                .select("*") \
-                .eq("user_id", user_id) \
-                .eq("blocked_user_id", partner) \
-                .execute()
-
-            if already.data:
-
-                reply(event.reply_token, "你已經封鎖過了")
-                return
-
-            supabase.table("blacklist").insert({
-                "user_id": user_id,
-                "blocked_user_id": partner,
-                "nickname": nickname
+            supabase.table("recent_pairs").insert({
+                "user1": user_id,
+                "user2": partner
             }).execute()
 
-            block_count = supabase.table("blacklist") \
-                .select("*", count="exact") \
-                .eq("blocked_user_id", partner) \
-                .execute()
-
-            if block_count.count >= 10:
-
-                check_ban = supabase.table("banned_users") \
-                    .select("*") \
-                    .eq("user_id", partner) \
-                    .execute()
-
-                if not check_ban.data:
-
-                    supabase.table("banned_users").insert({
-                        "user_id": partner,
-                        "reason": "被超過10人封鎖"
-                    }).execute()
-
-            supabase.table("chat_pairs") \
-                .delete() \
-                .eq("user_id", user_id) \
-                .execute()
-
-            supabase.table("chat_pairs") \
-                .delete() \
-                .eq("user_id", partner) \
-                .execute()
-
-            reply(event.reply_token, f"🚫 已封鎖 {nickname}")
-
-            try:
-                push_text(partner, "⚠️ 對方已離開聊天")
-            except:
-                pass
-
-            return
-
-        # =========================
-        # 一般聊天
-        # =========================
-        result = get_partner(user_id)
-
-        if result:
-
-            partner = result["partner_id"]
-            nickname = result["nickname"]
-
-            supabase.table("chat_logs").insert({
-                "sender_id": user_id,
-                "receiver_id": partner,
-                "sender_name": nickname,
-                "message_type": "text",
-                "message": text
-            }).execute()
+            reply(
+                event.reply_token,
+                f"✅ 配對成功！\n你的暱稱：{nickname1}"
+            )
 
             push_text(
                 partner,
-                f"{nickname}：{text}"
+                f"✅ 配對成功！\n你的暱稱：{nickname2}"
             )
 
         else:
 
-            reply(event.reply_token, "輸入「開始」開始匿名聊天")
+            supabase.table("waiting_users") \
+                .upsert({
+                    "user_id": user_id
+                }) \
+                .execute()
 
-    except Exception as e:
-        print(e)
+            reply(event.reply_token, "⏳ 等待配對中...")
+
+        return
+
+    # =========================
+    # 離開聊天
+    # =========================
+    if text == "離開":
+
+        result = supabase.table("chat_pairs") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .limit(1) \
+            .execute()
+
+        if not result.data:
+
+            reply(event.reply_token, "目前沒有聊天對象")
+            return
+
+        partner = result.data[0]["partner_id"]
+
+        supabase.table("chat_pairs") \
+            .delete() \
+            .eq("user_id", user_id) \
+            .execute()
+
+        supabase.table("chat_pairs") \
+            .delete() \
+            .eq("user_id", partner) \
+            .execute()
+
+        try:
+            push_text(
+                partner,
+                "⚠️ 對方已離開聊天"
+            )
+        except:
+            pass
+
+        reply(event.reply_token, "✅ 你已離開聊天")
+
+        return
+
+    # =========================
+    # 一般聊天
+    # =========================
+    result = supabase.table("chat_pairs") \
+        .select("*") \
+        .eq("user_id", user_id) \
+        .limit(1) \
+        .execute()
+
+    if result.data:
+
+        partner = result.data[0]["partner_id"]
+        nickname = result.data[0]["nickname"]
+
+        # 聊天紀錄
+        supabase.table("chat_logs").insert({
+            "sender_id": user_id,
+            "receiver_id": partner,
+            "sender_name": nickname,
+            "message_type": "text",
+            "message": text
+        }).execute()
+
+        push_text(
+            partner,
+            f"{nickname}：{text}"
+        )
+
+    else:
+
+        reply(
+            event.reply_token,
+            "輸入「開始」開始匿名聊天"
+        )
+
+except Exception as e:
+
+    print("文字錯誤")
+    print(e)
 
 
 # =========================
@@ -731,36 +908,29 @@ def handle_sticker(event):
 
         user_id = event.source.user_id
 
-        now = time.time()
+        result = supabase.table("chat_pairs") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .limit(1) \
+            .execute()
 
-        if user_id in sticker_cooldown:
-
-            diff = now - sticker_cooldown[user_id]
-
-            if diff < 5:
-
-                remain = round(5 - diff, 1)
-
-                reply(
-                    event.reply_token,
-                    f"⏳ 你的手速太快了，請 {remain} 秒後再試"
-                )
-
-                return
-
-        sticker_cooldown[user_id] = now
-
-        result = get_partner(user_id)
-
-        if not result:
+        if not result.data:
             return
 
-        partner = result["partner_id"]
+        partner = result.data[0]["partner_id"]
 
         package_id = str(event.message.package_id)
         sticker_id = str(event.message.sticker_id)
 
-        with ApiClient(configuration) as api_client:
+        # 聊天紀錄
+        supabase.table("chat_logs").insert({
+            "sender_id": user_id,
+            "receiver_id": partner,
+            "sender_name": "貼圖",
+            "message_type": "sticker",
+            "message": sticker_id
+        }).execute()
+                with ApiClient(configuration) as api_client:
 
             line_bot_api = MessagingApi(api_client)
 
@@ -777,6 +947,8 @@ def handle_sticker(event):
             )
 
     except Exception as e:
+
+        print("貼圖錯誤")
         print(e)
 
 
@@ -790,21 +962,39 @@ def handle_image(event):
 
         user_id = event.source.user_id
 
-        result = get_partner(user_id)
+        result = supabase.table("chat_pairs") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .limit(1) \
+            .execute()
 
-        if not result:
+        if not result.data:
             return
 
-        partner = result["partner_id"]
-        nickname = result["nickname"]
+        partner = result.data[0]["partner_id"]
+        nickname = result.data[0]["nickname"]
 
-        content = get_content(event.message.id)
+        message_id = event.message.id
+
+        headers = {
+            "Authorization": "Bearer " + CHANNEL_ACCESS_TOKEN
+        }
+
+        url = (
+            f"https://api-data.line.me/v2/bot/message/"
+            f"{message_id}/content"
+        )
+
+        response = requests.get(url, headers=headers)
+
+        if response.status_code != 200:
+            return
 
         filename = f"{uuid.uuid4()}.jpg"
 
         supabase.storage.from_("chat-images").upload(
             filename,
-            content,
+            response.content,
             {"content-type": "image/jpeg"}
         )
 
@@ -815,6 +1005,7 @@ def handle_image(event):
         if isinstance(image_url, dict):
             image_url = image_url["publicUrl"]
 
+        # 聊天紀錄
         supabase.table("chat_logs").insert({
             "sender_id": user_id,
             "receiver_id": partner,
@@ -822,6 +1013,11 @@ def handle_image(event):
             "message_type": "image",
             "message": image_url
         }).execute()
+
+        push_text(
+            partner,
+            f"🖼️ {nickname} 傳送了一張圖片"
+        )
 
         with ApiClient(configuration) as api_client:
 
@@ -840,55 +1036,27 @@ def handle_image(event):
             )
 
     except Exception as e:
+
+        print("圖片錯誤")
         print(e)
 
 
 # =========================
-# 語音
+# Reply
 # =========================
-@handler.add(MessageEvent, message=AudioMessageContent)
-def handle_audio(event):
+def reply(reply_token, text):
 
     try:
-
-        user_id = event.source.user_id
-
-        result = get_partner(user_id)
-
-        if not result:
-            return
-
-        partner = result["partner_id"]
-
-        content = get_content(event.message.id)
-
-        filename = f"{uuid.uuid4()}.m4a"
-
-        supabase.storage.from_("chat-images").upload(
-            filename,
-            content,
-            {"content-type": "audio/m4a"}
-        )
-
-        audio_url = supabase.storage \
-            .from_("chat-images") \
-            .get_public_url(filename)
-
-        if isinstance(audio_url, dict):
-            audio_url = audio_url["publicUrl"]
 
         with ApiClient(configuration) as api_client:
 
             line_bot_api = MessagingApi(api_client)
 
-            line_bot_api.push_message(
-                PushMessageRequest(
-                    to=partner,
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=reply_token,
                     messages=[
-                        AudioMessage(
-                            original_content_url=audio_url,
-                            duration=5000
-                        )
+                        TextMessage(text=text)
                     ]
                 )
             )
@@ -898,38 +1066,11 @@ def handle_audio(event):
 
 
 # =========================
-# 影片
+# Push Text
 # =========================
-@handler.add(MessageEvent, message=VideoMessageContent)
-def handle_video(event):
+def push_text(user_id, text):
 
     try:
-
-        user_id = event.source.user_id
-
-        result = get_partner(user_id)
-
-        if not result:
-            return
-
-        partner = result["partner_id"]
-
-        content = get_content(event.message.id)
-
-        filename = f"{uuid.uuid4()}.mp4"
-
-        supabase.storage.from_("chat-images").upload(
-            filename,
-            content,
-            {"content-type": "video/mp4"}
-        )
-
-        video_url = supabase.storage \
-            .from_("chat-images") \
-            .get_public_url(filename)
-
-        if isinstance(video_url, dict):
-            video_url = video_url["publicUrl"]
 
         with ApiClient(configuration) as api_client:
 
@@ -937,12 +1078,9 @@ def handle_video(event):
 
             line_bot_api.push_message(
                 PushMessageRequest(
-                    to=partner,
+                    to=user_id,
                     messages=[
-                        VideoMessage(
-                            original_content_url=video_url,
-                            preview_image_url=video_url
-                        )
+                        TextMessage(text=text)
                     ]
                 )
             )
