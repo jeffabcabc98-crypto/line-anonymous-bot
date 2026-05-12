@@ -758,7 +758,7 @@ def handle_text(event):
                         one_hour_ago.isoformat()
                     ) \
                     .execute()
-             if recent.data:
+                if recent.data:
 
                 reply(
                     event.reply_token,
