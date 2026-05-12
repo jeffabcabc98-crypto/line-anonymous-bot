@@ -820,7 +820,7 @@ def handle_text(event):
     # =========================
     # 離開聊天
     # =========================
-    if text == "離開":
+                if text == "離開":
 
         result = supabase.table("chat_pairs") \
             .select("*") \
