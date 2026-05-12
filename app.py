@@ -305,10 +305,11 @@ def handle_text(event):
                 index = int(parts[1]) - 1
 
                 result = supabase.table("blacklist") \
-                    .select("*") \
-                    .eq("user_id", user_id) \
-                    .execute()
-                                if not result.data:
+    .select("*") \
+    .eq("user_id", user_id) \
+    .execute()
+
+if not result.data:
 
                     reply(event.reply_token, "沒有封鎖名單")
                     return
